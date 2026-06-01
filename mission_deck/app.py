@@ -171,6 +171,15 @@ class DeviceCard(ctk.CTkFrame):
         )
         self._name.grid(row=0, column=1, sticky="ew", padx=(0, 14), pady=(14, 0))
 
+        # Recording pill — only shown for Recorder devices (hidden otherwise).
+        self._recording = ctk.CTkLabel(
+            self, text="", anchor="e",
+            font=ctk.CTkFont(size=11, weight="bold"),
+            text_color=recording_status_color(RecordingStatus.UNKNOWN),
+        )
+        self._recording.grid(row=0, column=2, sticky="e", padx=(0, 14), pady=(14, 0))
+        self._recording.grid_remove()
+
         self._subtitle = ctk.CTkLabel(
             self, text="", anchor="w",
             font=ctk.CTkFont(size=12), text_color=COLORS["text_muted"],
@@ -184,7 +193,7 @@ class DeviceCard(ctk.CTkFrame):
         self._meta.grid(row=2, column=1, sticky="ew", padx=(0, 14), pady=(0, 14))
 
         # Hover affordance + click to open the device's control actions.
-        for widget in (self, self._dot, self._name, self._subtitle, self._meta):
+        for widget in (self, self._dot, self._name, self._subtitle, self._meta, self._recording):
             widget.bind("<Enter>", self._on_enter)
             widget.bind("<Leave>", self._on_leave)
             widget.bind("<Button-1>", self._on_click)
@@ -217,6 +226,16 @@ class DeviceCard(ctk.CTkFrame):
             return
         self._dot.configure(text_color=status_color(self.device.status))
         self._meta.configure(text=self._meta_text())
+        # Recorders get a live recording-state pill; other devices hide it.
+        if isinstance(self.device, Recorder):
+            rec = self.device.recording_status
+            self._recording.configure(
+                text=recording_status_label(rec),
+                text_color=recording_status_color(rec),
+            )
+            self._recording.grid()
+        else:
+            self._recording.grid_remove()
 
     def _on_enter(self, _event=None) -> None:
         self.configure(fg_color=COLORS["card_hover"])
@@ -456,6 +475,11 @@ class DeviceControlDialog(ctk.CTkToplevel):
                 ).grid(row=0, column=1, padx=(6, 8))
             row += 1
 
+        # Recorder devices get dedicated start/stop buttons driven by their
+        # recording_start_url / recording_stop_url config keys.
+        if isinstance(self.device, Recorder):
+            row = self._build_recording_controls(row)
+
         # Always-present "add a command" button at the end of the list.
         ctk.CTkButton(
             self._actions, text="＋  Add Command", height=38, corner_radius=CORNER,
@@ -464,6 +488,60 @@ class DeviceControlDialog(ctk.CTkToplevel):
             font=ctk.CTkFont(size=13, weight="bold"),
             command=self._add_command,
         ).grid(row=row, column=0, sticky="ew", padx=8, pady=(8, 4))
+
+    def _build_recording_controls(self, row: int) -> int:
+        """Add recorder-specific Start/Stop buttons; return the next free row."""
+
+        assert isinstance(self.device, Recorder)
+        start_url = self.device.recording_start_url
+        stop_url = self.device.recording_stop_url
+        if not start_url and not stop_url:
+            return row
+
+        header = ctk.CTkLabel(
+            self._actions, text="Recording", anchor="w",
+            font=ctk.CTkFont(size=11, weight="bold"), text_color=COLORS["text_muted"],
+        )
+        header.grid(row=row, column=0, sticky="ew", padx=8, pady=(10, 2))
+        row += 1
+
+        if start_url:
+            ctk.CTkButton(
+                self._actions, text="● Start Recording", height=40, corner_radius=CORNER,
+                anchor="w", fg_color=COLORS["card"], hover_color=COLORS["card_hover"],
+                border_width=1, border_color=COLORS["online"], text_color=COLORS["online"],
+                font=ctk.CTkFont(size=13, weight="bold"),
+                command=lambda u=start_url: self._recording_action(u, "Start Recording"),
+            ).grid(row=row, column=0, sticky="ew", padx=8, pady=4)
+            row += 1
+        if stop_url:
+            ctk.CTkButton(
+                self._actions, text="■ Stop Recording", height=40, corner_radius=CORNER,
+                anchor="w", fg_color=COLORS["card"], hover_color=COLORS["card_hover"],
+                border_width=1, border_color=COLORS["offline"], text_color=COLORS["offline"],
+                font=ctk.CTkFont(size=13, weight="bold"),
+                command=lambda u=stop_url: self._recording_action(u, "Stop Recording"),
+            ).grid(row=row, column=0, sticky="ew", padx=8, pady=4)
+            row += 1
+        return row
+
+    def _recording_action(self, url: str, label: str) -> None:
+        """Fire a recorder start/stop URL, then re-poll its recording state."""
+
+        self._set_status(f"{label}…", duration_ms=0)
+        timeout = self.app._effective_timeout()
+
+        def on_done(ok: bool, message: str) -> None:
+            self._set_status(
+                message,
+                text_color=COLORS["online"] if ok else COLORS["offline"],
+            )
+            # Refresh the live recording state so the card pill catches up.
+            room = self.app.current_room
+            if ok and isinstance(self.device, Recorder) and room is not None:
+                self.app._poll_recording(self.device, room)
+
+        self.app.run_background(lambda: http_get(url, timeout), on_done)
 
     def _add_command(self) -> None:
         CommandEditorDialog(self.app, self.device, on_saved=self._build_actions)
@@ -1335,6 +1413,13 @@ class App(ctk.CTk):
         device.status = result.status
         device.last_latency_ms = result.latency_ms
         device.last_error = result.error
+        # Recorders carry a second, independent state (are they recording?).
+        # Poll it only when the device is reachable; otherwise it's unknown.
+        if isinstance(device, Recorder):
+            if result.status is DeviceStatus.ONLINE and device.recording_status_url:
+                self._poll_recording(device, room)
+            else:
+                device.recording_status = RecordingStatus.UNKNOWN
         # Repaint only if this device's card is the one currently on screen.
         if self.current_room is room:
             card = self._device_cards.get(device.id)
@@ -1342,6 +1427,31 @@ class App(ctk.CTk):
                 card.refresh()
             self._update_statusbar()
             self._refresh_room_health(room)
+
+    def _poll_recording(self, device: Recorder, room: Room) -> None:
+        """Fetch a recorder's recording state off-thread and repaint its card.
+
+        Runs after the reachability probe says the device is online. Failures
+        are swallowed by :func:`fetch_recording_status` (returns UNKNOWN), so
+        ``on_done`` always lands with ``ok=True``.
+        """
+
+        url = device.recording_status_url
+        if not url:
+            return
+        json_path = device.recording_status_json_path
+        timeout = self._effective_timeout()
+
+        def on_done(ok: bool, status) -> None:
+            if not ok or not isinstance(status, RecordingStatus):
+                return
+            device.recording_status = status
+            if self.current_room is room:
+                card = self._device_cards.get(device.id)
+                if card is not None and card.device is device:
+                    card.refresh()
+
+        self.run_background(lambda: fetch_recording_status(url, json_path, timeout), on_done)
 
     def _finish_check(self, generation: int) -> None:
         if generation != self._check_gen:

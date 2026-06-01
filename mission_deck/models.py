@@ -401,6 +401,16 @@ class Recorder(Device):
         url = self.extra.get("recording_stop_url")
         return str(url).strip() if isinstance(url, str) and url.strip() else None
 
+    @property
+    def recording_status_json_path(self) -> str:
+        """Dot-path into the status URL's JSON response (e.g. ``"state.recording"``).
+
+        Empty string means "use the whole response body" — see
+        :func:`network.fetch_recording_status`.
+        """
+        path = self.extra.get("recording_status_json_path")
+        return str(path).strip() if isinstance(path, str) and path.strip() else ""
+
 
 @dataclass(slots=True)
 class GenericDevice(Device):
