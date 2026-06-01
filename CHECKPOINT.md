@@ -104,12 +104,22 @@ All three:
 
 ## What's NOT done / known gaps / TODOs
 
-### Recorder recording status — wired up in models/network but NOT in the GUI
+### Recorder recording status — DONE ✅ (wired into the GUI on 2026-06-01)
 - `fetch_recording_status` exists and works
 - `Recorder.recording_status` field exists
 - `RecordingStatus` enum and theme colors/labels exist
-- **Missing:** the polling loop in `app.py` that calls `fetch_recording_status` for Recorder devices, and the DeviceCard UI that shows recording state (red "● Recording" pill etc.)
-- **Missing:** buttons for recording start/stop URLs on the device control dialog
+- **DONE:** `Recorder.recording_status_json_path` property (reads `extra`) so the
+  status URL's JSON response can be navigated (e.g. `state.recording`)
+- **DONE:** `DeviceCard` now shows a live recording pill (e.g. red "● Recording")
+  for Recorder devices; hidden for every other device type
+- **DONE:** the polling loop — `App._poll_recording()` fetches recording state
+  off-thread for online recorders; triggered from `_apply_result` during every
+  status check (manual + auto-refresh). Offline recorders reset to UNKNOWN.
+- **DONE:** `DeviceControlDialog` now renders a "Recording" section with
+  Start/Stop buttons (driven by `recording_start_url` / `recording_stop_url`);
+  pressing one fires the URL and re-polls the live state.
+- `config.example.json`'s recorder now carries dummy recording URLs so the
+  feature is demonstrable out of the box.
 
 ### No tests
 - The repo has `ruff` cache gitignored but no linter config, no test framework
