@@ -1,0 +1,11 @@
+# mission-deck runtime dependencies
+# Requires Python 3.11+
+
+# Modern, dark-mode-capable Tkinter UI toolkit
+customtkinter>=5.2.2
+
+# Pillow is used by CustomTkinter for image/icon rendering
+pillow>=10.0.0
+
+# Note: network status checks use asyncio + the standard-library socket module,
+# so no third-party networking dependency is required.

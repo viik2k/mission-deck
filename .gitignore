@@ -216,3 +216,14 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# ---------------------------------------------------------------------------
+# mission-deck: environment data must NEVER be committed.
+# The repo ships only config.example.json (dummy data). Real infrastructure
+# config (IPs, device names) lives in an untracked local config.json.
+# ---------------------------------------------------------------------------
+config.json
+config.*.json
+!config.example.json
+# Any local config variants users might create
+*.local.json

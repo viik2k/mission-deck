@@ -1,0 +1,202 @@
+{
+  "schema_version": 1,
+  "app": {
+    "ping_timeout_seconds": 2.0,
+    "default_appearance": "dark",
+    "browser": {
+      "path": "",
+      "name": "",
+      "new_window": true
+    }
+  },
+  "rooms": [
+    {
+      "id": "courtroom-1a",
+      "name": "Courtroom 1A",
+      "city": "Melbourne",
+      "location": "1st Floor - East Wing",
+      "notes": "Main felony trial courtroom.",
+      "devices": [
+        {
+          "id": "1a-crestron-cp4",
+          "name": "Crestron Control Processor",
+          "type": "control_processor",
+          "manufacturer": "Crestron",
+          "model": "CP4",
+          "host": "10.10.1.10",
+          "port": 41794,
+          "protocol": "tcp",
+          "web_protocol": "http",
+          "web_port": 80,
+          "tags": ["control", "automation"]
+        },
+        {
+          "id": "1a-ptz-judge",
+          "name": "Judge Bench PTZ Camera",
+          "type": "ptz_camera",
+          "manufacturer": "Sony",
+          "model": "SRG-300H",
+          "host": "10.10.1.21",
+          "port": 80,
+          "protocol": "http",
+          "tags": ["camera", "video"]
+        },
+        {
+          "id": "1a-ptz-witness",
+          "name": "Witness Stand PTZ Camera",
+          "type": "ptz_camera",
+          "manufacturer": "Sony",
+          "model": "SRG-300H",
+          "host": "10.10.1.22",
+          "port": 80,
+          "protocol": "http",
+          "tags": ["camera", "video"]
+        },
+        {
+          "id": "1a-dsp",
+          "name": "Audio DSP",
+          "type": "audio_dsp",
+          "manufacturer": "Biamp",
+          "model": "TesiraFORTE",
+          "host": "10.10.1.30",
+          "port": 22,
+          "protocol": "ssh",
+          "tags": ["audio"]
+        },
+        {
+          "id": "1a-display-gallery",
+          "name": "Gallery Evidence Display",
+          "type": "display",
+          "manufacturer": "Samsung",
+          "model": "QM55R",
+          "host": "10.10.1.41",
+          "port": 1515,
+          "protocol": "tcp",
+          "tags": ["display", "video"]
+        },
+        {
+          "id": "1a-recorder",
+          "name": "Digital Court Recorder",
+          "type": "recorder",
+          "manufacturer": "JAVS",
+          "model": "Notewise",
+          "host": "10.10.1.50",
+          "port": 443,
+          "protocol": "https",
+          "web_path": "/admin",
+          "tags": ["recording", "record"]
+        }
+      ]
+    },
+    {
+      "id": "courtroom-2b",
+      "name": "Courtroom 2B",
+      "city": "Melbourne",
+      "location": "2nd Floor - West Wing",
+      "notes": "Civil and arraignment courtroom.",
+      "devices": [
+        {
+          "id": "2b-crestron-cp4",
+          "name": "Crestron Control Processor",
+          "type": "control_processor",
+          "manufacturer": "Crestron",
+          "model": "CP4N",
+          "host": "10.10.2.10",
+          "port": 41794,
+          "protocol": "tcp",
+          "web_protocol": "http",
+          "web_port": 80,
+          "tags": ["control", "automation"]
+        },
+        {
+          "id": "2b-ptz-room",
+          "name": "Room Overview PTZ Camera",
+          "type": "ptz_camera",
+          "manufacturer": "Vaddio",
+          "model": "RoboSHOT 12E",
+          "host": "10.10.2.21",
+          "port": 80,
+          "protocol": "http",
+          "tags": ["camera", "video"]
+        },
+        {
+          "id": "2b-dsp",
+          "name": "Audio DSP",
+          "type": "audio_dsp",
+          "manufacturer": "QSC",
+          "model": "Core 110f",
+          "host": "10.10.2.30",
+          "port": 1710,
+          "protocol": "tcp",
+          "tags": ["audio"]
+        },
+        {
+          "id": "2b-doc-camera",
+          "name": "Evidence Document Camera",
+          "type": "document_camera",
+          "manufacturer": "ELMO",
+          "model": "PX-30E",
+          "host": "10.10.2.45",
+          "port": 80,
+          "protocol": "http",
+          "tags": ["camera", "evidence"]
+        },
+        {
+          "id": "2b-display-judge",
+          "name": "Judge Bench Monitor",
+          "type": "display",
+          "manufacturer": "NEC",
+          "model": "E243F",
+          "host": "10.10.2.42",
+          "port": 7142,
+          "protocol": "tcp",
+          "tags": ["display", "video"]
+        }
+      ]
+    },
+    {
+      "id": "courtroom-7",
+      "name": "Courtroom 7",
+      "city": "Sydney",
+      "location": "Ground Floor",
+      "notes": "Downing Centre - directions hearings.",
+      "devices": [
+        {
+          "id": "syd7-crestron",
+          "name": "Crestron Control Processor",
+          "type": "control_processor",
+          "manufacturer": "Crestron",
+          "model": "CP4N",
+          "host": "10.20.7.10",
+          "port": 41794,
+          "protocol": "tcp",
+          "web_protocol": "http",
+          "web_port": 80,
+          "tags": ["control", "automation"]
+        },
+        {
+          "id": "syd7-ptz",
+          "name": "Room Overview PTZ Camera",
+          "type": "ptz_camera",
+          "manufacturer": "Sony",
+          "model": "SRG-300H",
+          "host": "10.20.7.21",
+          "port": 80,
+          "protocol": "http",
+          "tags": ["camera", "video"]
+        },
+        {
+          "id": "syd7-dsp",
+          "name": "Audio DSP",
+          "type": "audio_dsp",
+          "manufacturer": "QSC",
+          "model": "Core 110f",
+          "host": "10.20.7.30",
+          "port": 1710,
+          "protocol": "tcp",
+          "tags": ["audio"]
+        }
+      ]
+    }
+  ]
+}
