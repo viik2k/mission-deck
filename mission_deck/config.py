@@ -80,8 +80,13 @@ def _app_root() -> Path:
     return Path(__file__).resolve().parent.parent
 
 
-def _user_config_dir() -> Path:
-    """Per-user config directory, following platform conventions."""
+def user_config_dir() -> Path:
+    """Per-user, writable config/state directory, following OS conventions.
+
+    This is where the app stores its remembered settings (``state.json``) and a
+    good default home for a user-managed ``config.json`` — important once the
+    app is packaged as a single EXE living in a read-only Program Files folder.
+    """
 
     if sys.platform == "win32":
         base = os.environ.get("APPDATA") or (Path.home() / "AppData" / "Roaming")
@@ -90,6 +95,26 @@ def _user_config_dir() -> Path:
     else:  # Linux / other POSIX
         base = os.environ.get("XDG_CONFIG_HOME") or (Path.home() / ".config")
     return Path(base) / "mission-deck"
+
+
+# Backwards-compatible alias (kept private name used internally).
+_user_config_dir = user_config_dir
+
+
+def resource_path(name: str) -> Path:
+    """Locate a bundled read-only resource, working under PyInstaller.
+
+    When frozen with ``--onefile``, data files are unpacked to ``sys._MEIPASS``;
+    otherwise they sit next to the app. Used for the shipped
+    ``config.example.json`` template.
+    """
+
+    base = getattr(sys, "_MEIPASS", None)
+    if base:
+        candidate = Path(base) / name
+        if candidate.exists():
+            return candidate
+    return _app_root() / name
 
 
 def candidate_config_paths() -> list[Path]:
@@ -133,9 +158,9 @@ def find_config() -> Path | None:
 
 
 def example_config_path() -> Path:
-    """Location of the bundled dummy-data example config."""
+    """Location of the bundled dummy-data example config (PyInstaller-aware)."""
 
-    return _app_root() / EXAMPLE_CONFIG_FILENAME
+    return resource_path(EXAMPLE_CONFIG_FILENAME)
 
 
 # --------------------------------------------------------------------------- #

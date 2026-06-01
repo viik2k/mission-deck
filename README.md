@@ -32,9 +32,27 @@ tool).
   a room concurrently (async TCP connect with a configurable timeout) on a
   background thread, flipping each indicator green (online) or red (offline)
   live as results arrive — without freezing the UI.
+- **Auto-refresh** — an optional toggle re-runs the status check for the current
+  room on an interval, so the dashboard stays live hands-free.
+- **Device control** — click any device card to open its control panel. Actions
+  are vendor-neutral and **config-driven**: describe an HTTP URL or TCP payload
+  in the device's `commands` list and it becomes a button (camera presets,
+  power on/off, custom commands). Commands run off the UI thread.
 - **Modular device classes** — a clean, registry-based class structure so new
-  device types and control commands (HTTP/TCP to a Crestron, PTZ camera, etc.)
-  can be added easily.
+  device types can be added easily.
+
+### Built for non-technical users
+
+- **No JSON required day-to-day** — a friendly **welcome screen** (not a bare
+  file dialog) lets staff open a config, pick a **recent** one, or explore demo
+  data. The last-opened config is **remembered**, so the app just opens to it
+  next launch.
+- **Settings dialog (⚙)** — appearance (dark/light/system), status-check
+  timeout, auto-refresh interval, and the browser to use (with a Browse button)
+  are all editable in the GUI and saved per-user. Switching to a different
+  config is a menu click.
+- **Ships as a single `.exe`** — one double-clickable file, no Python install
+  (see [Packaging](#packaging-a-single-exe)).
 
 ## Requirements
 
@@ -133,6 +151,7 @@ mission-deck looks for a config in this order (first match wins):
 | `tags` | no | List of strings |
 | `web_url` | no | Explicit web UI URL (overrides everything below) |
 | `web_protocol` / `web_port` / `web_path` | no | Build a web UI URL separately from the control port |
+| `commands` | no | List of control actions (buttons) for the device — see below |
 
 **Control port vs web UI:** a device's *status check* uses `protocol`/`port`,
 while **Open Web UIs** uses `web_url` (or `web_protocol`/`web_port`/`web_path`,
@@ -142,6 +161,32 @@ scheme (e.g. SSH/raw-TCP only) are simply skipped when opening web UIs.
 **Registered device types:** `control_processor` (aka `crestron`, `controller`),
 `ptz_camera` (`camera`), `audio_dsp` (`dsp`), `display` (`monitor`, `tv`),
 `document_camera` (`doc_camera`), `recorder`.
+
+#### Device control commands
+
+Clicking a device card opens a control panel. Besides the built-in "Open Web
+UI", every entry in the device's `commands` list becomes a button — no code
+required:
+
+```jsonc
+"commands": [
+  {"id": "preset1", "label": "Camera Preset 1", "protocol": "http",
+   "url": "http://{host}/cgi-bin/ptzctrl?action=recall&preset=1"},
+  {"id": "power_on", "label": "Power On", "protocol": "tcp",
+   "payload": "PWR ON\r", "port": 4998},
+  {"id": "send", "label": "Send Command", "protocol": "tcp",
+   "payload": "{value}\r", "prompt": "Command to send", "read_response": true}
+]
+```
+
+- `protocol`: `http`/`https` (issues a GET to `url`) or `tcp` (sends `payload`).
+- Placeholders `{host}`, `{port}`, `{value}` are substituted at run time.
+- `prompt`: when set, the UI asks the user for a value (`{value}`) first.
+- `read_response` (tcp): wait for and display a short reply.
+- `port` (tcp): override the device's control port for this command.
+
+Commands run on a background thread, so a slow or unreachable device never
+freezes the UI; the result/error is shown in the control panel.
 
 ### Browser configuration
 
@@ -161,8 +206,29 @@ scheme (e.g. SSH/raw-TCP only) are simply skipped when opening web UIs.
 python -m mission_deck
 ```
 
-If no `config.json` is found you'll be prompted to pick one; cancel to browse
-the bundled example data.
+On first launch (no config found) a welcome screen lets you open a config file
+or explore the demo data. After that, the app reopens your last config
+automatically.
+
+## Packaging a single EXE
+
+The app is built to ship as one double-clickable `.exe` so non-technical users
+don't need Python.
+
+```powershell
+pip install -r requirements-dev.txt
+.\build.ps1            # or: pyinstaller mission-deck.spec
+```
+
+This produces `dist\mission-deck.exe` (~19 MB, windowed/no console). Notes:
+
+- `config.example.json` is bundled (powers "Explore Demo Data"); CustomTkinter's
+  theme assets are collected automatically by the spec.
+- The user's **real** `config.json` is *not* bundled — it lives next to the EXE
+  or in `%APPDATA%\mission-deck`, and the chosen file is remembered between runs.
+- Per-user preferences are stored in `%APPDATA%\mission-deck\state.json`, which
+  keeps the install itself read-only-friendly.
+- To brand the EXE, set an `.ico` path in `mission-deck.spec` (`icon=`).
 
 ## Project structure
 
@@ -170,12 +236,18 @@ the bundled example data.
 mission-deck/
 ├── config.example.json      # dummy data (the only config in the repo)
 ├── requirements.txt
+├── requirements-dev.txt     # + pyinstaller, for building the EXE
+├── mission-deck.spec        # PyInstaller build spec
+├── build.ps1                # one-command EXE build
 └── mission_deck/
     ├── __init__.py          # version / app metadata
     ├── __main__.py          # `python -m mission_deck` entry point
     ├── config.py            # locate / load / structurally validate config
     ├── models.py            # Site → Room → Device typed models + registry
+    ├── network.py           # async status checks + control transports
+    ├── controls.py          # per-device control actions (config-driven)
     ├── browser.py           # open web UIs in the configured browser
+    ├── state.py             # remembered config + GUI-managed preferences
     ├── theme.py             # dark palette + sizing tokens
     └── app.py               # CustomTkinter UI
 ```

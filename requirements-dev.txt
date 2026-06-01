@@ -1,0 +1,5 @@
+# Development & packaging dependencies (not needed to run from source).
+-r requirements.txt
+
+# Build a single distributable EXE (see mission-deck.spec / build.ps1).
+pyinstaller>=6.6

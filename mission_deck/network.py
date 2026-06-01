@@ -22,7 +22,10 @@ so cards flip green/red live, as results stream in, without freezing.
 from __future__ import annotations
 
 import asyncio
+import socket
 import time
+import urllib.error
+import urllib.request
 from dataclasses import dataclass
 from typing import Callable, Iterable
 
@@ -104,3 +107,56 @@ def run_status_checks(
         loop.run_until_complete(_check_all(device_list, timeout, publish))
     finally:
         loop.close()
+
+
+# --------------------------------------------------------------------------- #
+# One-shot device control transports (blocking; run on a worker thread)
+# --------------------------------------------------------------------------- #
+# These power the device control actions (see ``controls.py``). They are simple,
+# synchronous, and timeout-bounded — a single command at a time — and meant to
+# be executed off the UI thread by the app's background runner.
+
+def http_get(url: str, timeout: float = 5.0) -> str:
+    """Issue an HTTP(S) GET and return a short human-readable result."""
+
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as response:
+            status = getattr(response, "status", response.getcode())
+            return f"HTTP {status} OK"
+    except urllib.error.HTTPError as exc:
+        # The server answered, just not 2xx — still a "reached it" outcome.
+        return f"HTTP {exc.code} {exc.reason}"
+    except (urllib.error.URLError, OSError, ValueError) as exc:
+        reason = getattr(exc, "reason", exc)
+        raise ControlError(f"Request failed: {reason}") from exc
+
+
+def tcp_send(
+    host: str,
+    port: int,
+    payload: bytes,
+    timeout: float = 5.0,
+    read_response: bool = False,
+) -> str:
+    """Open a TCP socket, send ``payload``, optionally read a short reply."""
+
+    if not port:
+        raise ControlError("No port configured for this command.")
+    try:
+        with socket.create_connection((host, port), timeout=timeout) as sock:
+            sock.sendall(payload)
+            if not read_response:
+                return f"Sent {len(payload)} bytes to {host}:{port}"
+            sock.settimeout(timeout)
+            try:
+                data = sock.recv(2048)
+            except socket.timeout:
+                return "Sent; no response (timed out waiting for reply)"
+            text = data.decode("utf-8", errors="replace").strip()
+            return f"Reply: {text}" if text else "Sent; empty reply"
+    except OSError as exc:
+        raise ControlError(f"Connection failed: {exc}") from exc
+
+
+class ControlError(Exception):
+    """A device control command could not be completed."""
