@@ -1,7 +1,7 @@
 # mission-deck
 
 A modern, open-source desktop tool for managing courtroom AV equipment — a
-Python/CustomTkinter replacement for the legacy PowerShell GUI script.
+Python/CustomTkinter replacement for a legacy PowerShell GUI script.
 
 mission-deck gives AV technicians a single dark-mode dashboard to browse every
 room's equipment, check whether devices are online, and **open all of a room's
