@@ -30,7 +30,7 @@ import enum
 from dataclasses import dataclass, field
 from typing import Any, Callable, Iterable
 
-from .config import LoadedConfig
+from .config import SUPPORTED_SCHEMA_VERSION, LoadedConfig
 
 
 # --------------------------------------------------------------------------- #
@@ -56,6 +56,15 @@ class DeviceStatus(enum.Enum):
         """True once we have a definitive answer (online or offline)."""
 
         return self in (DeviceStatus.ONLINE, DeviceStatus.OFFLINE)
+
+
+class RecordingStatus(enum.Enum):
+    """Recording state of a Recorder device, polled separately from reachability."""
+
+    UNKNOWN = "unknown"       # never checked, or device is offline
+    IDLE = "idle"             # reachable but not recording
+    RECORDING = "recording"   # actively recording
+    PAUSED = "paused"         # recording session paused
 
 
 # --------------------------------------------------------------------------- #
@@ -176,6 +185,34 @@ class Device:
             tags=tags,
             extra=extra,
         )
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialise this device back to its JSON config form.
+
+        The inverse of :meth:`from_dict`. Unknown keys preserved in
+        :attr:`extra` (``web_*`` overrides, ``commands``, …) are written back
+        verbatim, so a load → edit → save round-trip never silently drops
+        config a future build might rely on.
+        """
+
+        data: dict[str, Any] = {
+            "id": self.id,
+            "name": self.name,
+            "type": self.type,
+            "host": self.host,
+            "port": self.port,
+            "protocol": self.protocol,
+        }
+        if self.manufacturer:
+            data["manufacturer"] = self.manufacturer
+        if self.model:
+            data["model"] = self.model
+        if self.tags:
+            data["tags"] = list(self.tags)
+        # Preserved/forward-compatible fields (web_url, commands, …) last.
+        for key, value in self.extra.items():
+            data[key] = value
+        return data
 
     # ------------------------------------------------------------------ #
     # Convenience
@@ -347,6 +384,22 @@ class DocumentCamera(Device):
 @dataclass(slots=True)
 class Recorder(Device):
     category: str = "Recorder"
+    recording_status: RecordingStatus = field(default=RecordingStatus.UNKNOWN, compare=False)
+
+    @property
+    def recording_status_url(self) -> str | None:
+        url = self.extra.get("recording_status_url")
+        return str(url).strip() if isinstance(url, str) and url.strip() else None
+
+    @property
+    def recording_start_url(self) -> str | None:
+        url = self.extra.get("recording_start_url")
+        return str(url).strip() if isinstance(url, str) and url.strip() else None
+
+    @property
+    def recording_stop_url(self) -> str | None:
+        url = self.extra.get("recording_stop_url")
+        return str(url).strip() if isinstance(url, str) and url.strip() else None
 
 
 @dataclass(slots=True)
@@ -369,6 +422,8 @@ class Room:
     location: str = ""
     notes: str = ""
     devices: list[Device] = field(default_factory=list)
+    # Unknown room-level keys, preserved across a load/save round-trip.
+    extra: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "Room":
@@ -401,6 +456,9 @@ class Room:
             seen_ids.add(device.id)
             devices.append(device)
 
+        known = {"id", "name", "city", "location", "notes", "devices"}
+        extra = {k: v for k, v in data.items() if k not in known}
+
         return cls(
             id=room_id.strip(),
             name=name.strip(),
@@ -408,7 +466,23 @@ class Room:
             location=str(data.get("location", "")).strip(),
             notes=str(data.get("notes", "")).strip(),
             devices=devices,
+            extra=extra,
         )
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialise this room (and its devices) back to JSON config form."""
+
+        data: dict[str, Any] = {"id": self.id, "name": self.name}
+        if self.city:
+            data["city"] = self.city
+        if self.location:
+            data["location"] = self.location
+        if self.notes:
+            data["notes"] = self.notes
+        for key, value in self.extra.items():
+            data[key] = value
+        data["devices"] = [d.to_dict() for d in self.devices]
+        return data
 
     @property
     def device_count(self) -> int:
@@ -441,6 +515,28 @@ class Room:
                 seen.add(url)
                 urls.append(url)
         return urls
+
+    @property
+    def room_health(self) -> DeviceStatus:
+        """Aggregate health based on all device statuses in this room.
+
+        Returns:
+            ONLINE  — every device is ONLINE.
+            OFFLINE — every device is OFFLINE.
+            CHECKING / amber — mixed (some online, some offline / checking).
+            UNKNOWN / gray — no devices, or every device is UNKNOWN.
+        """
+
+        if not self.devices:
+            return DeviceStatus.UNKNOWN
+        statuses = {d.status for d in self.devices}
+        if all(s == DeviceStatus.UNKNOWN for s in statuses):
+            return DeviceStatus.UNKNOWN
+        if all(s == DeviceStatus.ONLINE for s in statuses):
+            return DeviceStatus.ONLINE
+        if all(s == DeviceStatus.OFFLINE for s in statuses):
+            return DeviceStatus.OFFLINE
+        return DeviceStatus.CHECKING  # amber for mixed / in-progress
 
     def __str__(self) -> str:  # pragma: no cover - cosmetic
         return f"{self.name} ({self.device_count} devices)"
@@ -475,6 +571,20 @@ class Site:
             rooms.append(room)
 
         return cls(rooms=rooms, settings=loaded.app_settings)
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialise the whole site back to a config dict ready to write.
+
+        Produces the ``{schema_version, app, rooms}`` shape understood by
+        :func:`mission_deck.config.load_config`. The ``app`` settings block is
+        preserved as loaded.
+        """
+
+        data: dict[str, Any] = {"schema_version": SUPPORTED_SCHEMA_VERSION}
+        if self.settings:
+            data["app"] = self.settings
+        data["rooms"] = [r.to_dict() for r in self.rooms]
+        return data
 
     @property
     def ping_timeout_seconds(self) -> float:

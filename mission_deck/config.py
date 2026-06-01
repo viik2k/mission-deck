@@ -237,6 +237,42 @@ def load_config(path: str | os.PathLike[str] | None = None) -> LoadedConfig:
     return LoadedConfig(path=config_path, data=data)
 
 
+def save_config(path: str | os.PathLike[str], data: dict[str, Any]) -> Path:
+    """Write a config dict to ``path`` as pretty JSON, atomically.
+
+    The data is structurally validated first (so a UI bug can never persist a
+    malformed config), then written to a sibling ``*.tmp`` file and
+    :func:`os.replace`-d into place — meaning a crash mid-write can't leave a
+    truncated config on disk.
+
+    Returns the resolved path written to.
+
+    Raises
+    ------
+    ConfigValidationError
+        The data does not match the expected structure.
+    ConfigError
+        The file could not be written.
+    """
+
+    target = Path(path).expanduser()
+    _validate_structure(data, target)
+
+    text = json.dumps(data, indent=2, ensure_ascii=False) + "\n"
+    tmp = target.with_name(target.name + ".tmp")
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        tmp.write_text(text, encoding="utf-8")
+        os.replace(tmp, target)
+    except OSError as exc:
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise ConfigError(f"Unable to save '{target}': {exc}") from exc
+    return target
+
+
 def _validate_structure(data: Any, source: Path) -> None:
     """Confirm the top-level shape of the config. Cheap, not exhaustive.
 

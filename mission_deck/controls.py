@@ -50,6 +50,9 @@ class DeviceControl:
     run: Callable[[str | None], str]
     prompt: str | None = None  # when set, the UI asks for a value first
     kind: str = "command"      # "command" | "web" — lets the UI style them
+    # The originating config ``commands`` entry, if any — lets the GUI offer an
+    # "edit this command" affordance. None for built-ins like "Open Web UI".
+    source: dict | None = None
 
 
 def _format(template: str, device: Device, value: str | None) -> str:
@@ -96,7 +99,41 @@ def _make_command_control(device: Device, spec: dict) -> DeviceControl | None:
     else:
         return None
 
-    return DeviceControl(id=cid, label=label, run=run, prompt=prompt, kind="command")
+    return DeviceControl(
+        id=cid, label=label, run=run, prompt=prompt, kind="command", source=spec
+    )
+
+
+def validate_command_spec(spec: dict) -> None:
+    """Validate one ``commands`` entry, raising :class:`ControlError` if bad.
+
+    Used by the GUI command editor so a user adding a control button gets a
+    human-readable reason instead of a button that silently does nothing.
+    """
+
+    if not isinstance(spec, dict):
+        raise ControlError("A command must be an object.")
+    label = str(spec.get("label") or spec.get("id") or "").strip()
+    if not label:
+        raise ControlError("Give the command a label (the button text).")
+
+    protocol = str(spec.get("protocol", "tcp")).lower()
+    if protocol in ("http", "https"):
+        if not str(spec.get("url") or "").strip():
+            raise ControlError("An HTTP command needs a URL to request.")
+    elif protocol == "tcp":
+        payload = spec.get("payload")
+        if not isinstance(payload, str) or not payload:
+            raise ControlError("A TCP command needs a payload to send.")
+        port = spec.get("port")
+        if port is not None and (
+            not isinstance(port, int) or isinstance(port, bool) or not (0 <= port <= 65535)
+        ):
+            raise ControlError("The port must be a whole number from 0 to 65535.")
+    else:
+        raise ControlError(
+            f"Unsupported protocol {protocol!r}. Use 'http', 'https' or 'tcp'."
+        )
 
 
 def controls_for(device: Device, browser_cfg: BrowserConfig) -> list[DeviceControl]:

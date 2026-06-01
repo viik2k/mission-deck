@@ -7,7 +7,7 @@ low-saturation with a single accent so the status indicators (green/red) pop.
 
 from __future__ import annotations
 
-from mission_deck.models import DeviceStatus
+from mission_deck.models import DeviceStatus, RecordingStatus
 
 # --------------------------------------------------------------------------- #
 # Palette (dark)
@@ -27,6 +27,8 @@ COLORS: dict[str, str] = {
     "accent_hover": "#2f6fe0",
     "accent_soft": "#1d2740",   # selected sidebar item fill
     "pill": "#232a36",          # category pill background
+    "online": "#22c55e",        # success / command-ok feedback
+    "offline": "#ef4444",       # error / command-fail feedback
 }
 
 # Status indicator colours, keyed by DeviceStatus.
@@ -51,6 +53,30 @@ def status_color(status: DeviceStatus) -> str:
 
 def status_label(status: DeviceStatus) -> str:
     return STATUS_LABELS.get(status, "Unknown")
+
+
+# Recording status colours and labels.
+RECORDING_STATUS_COLORS: dict[RecordingStatus, str] = {
+    RecordingStatus.RECORDING: "#ef4444",   # red — "on air" convention
+    RecordingStatus.PAUSED: "#f59e0b",      # amber
+    RecordingStatus.IDLE: "#6b7280",        # gray
+    RecordingStatus.UNKNOWN: "#5b616d",     # faint
+}
+
+RECORDING_STATUS_LABELS: dict[RecordingStatus, str] = {
+    RecordingStatus.RECORDING: "● Recording",
+    RecordingStatus.PAUSED: "◐ Paused",
+    RecordingStatus.IDLE: "○ Idle",
+    RecordingStatus.UNKNOWN: "○ Unknown",
+}
+
+
+def recording_status_color(status: RecordingStatus) -> str:
+    return RECORDING_STATUS_COLORS.get(status, RECORDING_STATUS_COLORS[RecordingStatus.UNKNOWN])
+
+
+def recording_status_label(status: RecordingStatus) -> str:
+    return RECORDING_STATUS_LABELS.get(status, "Unknown")
 
 
 # --------------------------------------------------------------------------- #

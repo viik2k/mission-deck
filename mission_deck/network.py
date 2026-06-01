@@ -22,14 +22,15 @@ so cards flip green/red live, as results stream in, without freezing.
 from __future__ import annotations
 
 import asyncio
+import json
 import socket
 import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
-from typing import Callable, Iterable
+from typing import Any, Callable, Iterable
 
-from .models import Device, DeviceStatus
+from .models import Device, DeviceStatus, RecordingStatus
 
 
 @dataclass(slots=True)
@@ -160,3 +161,42 @@ def tcp_send(
 
 class ControlError(Exception):
     """A device control command could not be completed."""
+
+
+def fetch_recording_status(
+    url: str, json_path: str = "", timeout: float = 5.0
+) -> RecordingStatus:
+    """GET ``url``, parse JSON, navigate ``json_path`` (dot-separated), return RecordingStatus.
+
+    ``json_path`` example: ``"state.recording"`` navigates ``response["state"]["recording"]``.
+    Returns UNKNOWN on any error (network, parse, unexpected value).
+    """
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as response:
+            raw = response.read().decode("utf-8", errors="replace")
+        data: Any = json.loads(raw)
+        if json_path:
+            for key in json_path.split("."):
+                if isinstance(data, dict):
+                    data = data.get(key)
+                else:
+                    return RecordingStatus.UNKNOWN
+        return _parse_recording_value(data)
+    except Exception:
+        return RecordingStatus.UNKNOWN
+
+
+def _parse_recording_value(value: Any) -> RecordingStatus:
+    if isinstance(value, bool):
+        return RecordingStatus.RECORDING if value else RecordingStatus.IDLE
+    if isinstance(value, int):
+        return RecordingStatus.RECORDING if value else RecordingStatus.IDLE
+    if isinstance(value, str):
+        v = value.strip().lower()
+        if v in ("recording", "active", "true", "1", "on", "started", "running"):
+            return RecordingStatus.RECORDING
+        if v in ("paused", "pause", "suspended"):
+            return RecordingStatus.PAUSED
+        if v in ("idle", "stopped", "false", "0", "off", "inactive", "ready"):
+            return RecordingStatus.IDLE
+    return RecordingStatus.UNKNOWN

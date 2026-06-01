@@ -28,14 +28,20 @@ import customtkinter as ctk
 from mission_deck import __app_name__, __version__
 from mission_deck.browser import BrowserConfig, open_urls
 from mission_deck.controls import DeviceControl, controls_for
-from mission_deck.network import CheckResult, run_status_checks
+from mission_deck.editors import (
+    CommandEditorDialog,
+    DeviceEditorDialog,
+    RoomEditorDialog,
+)
+from mission_deck.network import CheckResult, fetch_recording_status, http_get, run_status_checks
 from mission_deck.config import (
     ConfigError,
     example_config_path,
     find_config,
     load_config,
+    save_config,
 )
-from mission_deck.models import Device, DeviceStatus, Room, Site
+from mission_deck.models import Device, DeviceStatus, Recorder, RecordingStatus, Room, Site
 from mission_deck.state import AppState
 from mission_deck.theme import (
     CORNER,
@@ -44,6 +50,8 @@ from mission_deck.theme import (
     PAD,
     SIDEBAR_WIDTH,
     COLORS,
+    recording_status_color,
+    recording_status_label,
     status_color,
     status_label,
 )
@@ -53,7 +61,7 @@ from mission_deck.theme import (
 # Sidebar room button
 # --------------------------------------------------------------------------- #
 class RoomButton(ctk.CTkButton):
-    """A selectable room entry in the sidebar."""
+    """A selectable room entry in the sidebar with a health dot."""
 
     # Fonts are shared across all instances so selecting a room never builds a
     # new font object — important when there are 100+ buttons.
@@ -62,6 +70,7 @@ class RoomButton(ctk.CTkButton):
 
     def __init__(self, master, room: Room, command):
         self.room = room
+        self._selected = False
         cls = type(self)
         if cls._font_normal is None:
             cls._font_normal = ctk.CTkFont(size=14, weight="normal")
@@ -78,20 +87,49 @@ class RoomButton(ctk.CTkButton):
             font=cls._font_normal,
             command=lambda: command(room),
         )
+        self._health_dot = ctk.CTkLabel(
+            self,
+            text="●",
+            width=16,
+            font=ctk.CTkFont(size=12),
+            text_color=status_color(room.room_health),
+            fg_color="transparent",
+        )
+        self._health_dot.place(relx=1.0, rely=0.5, anchor="e", x=-10)
+        # Forward hover events from dot so button hover state stays active and
+        # the dot's canvas bg stays in sync (prevents the visible square).
+        self._health_dot.bind("<Enter>", self._on_enter)
+        self._health_dot.bind("<Leave>", self._on_leave)
+
+    def _on_enter(self, event=None):
+        super()._on_enter(event)
+        self._health_dot.configure(fg_color=COLORS["card_hover"])
+
+    def _on_leave(self, event=None):
+        super()._on_leave(event)
+        self._health_dot.configure(
+            fg_color=COLORS["accent_soft"] if self._selected else "transparent"
+        )
+
+    def refresh_health(self) -> None:
+        self._health_dot.configure(text_color=status_color(self.room.room_health))
 
     def set_selected(self, selected: bool) -> None:
+        self._selected = selected
         if selected:
             self.configure(
                 fg_color=COLORS["accent_soft"],
                 text_color=COLORS["text"],
                 font=type(self)._font_bold,
             )
+            self._health_dot.configure(fg_color=COLORS["accent_soft"])
         else:
             self.configure(
                 fg_color="transparent",
                 text_color=COLORS["text_muted"],
                 font=type(self)._font_normal,
             )
+            self._health_dot.configure(fg_color="transparent")
 
 
 # --------------------------------------------------------------------------- #
@@ -323,8 +361,9 @@ class DeviceControlDialog(ctk.CTkToplevel):
         self.device = device
         self.title(device.name)
         self.configure(fg_color=COLORS["bg"])
-        self.geometry("420x360")
+        self.geometry("440x540")
         self.transient(app)
+        self._status_clear_job: str | None = None
         self.grid_columnconfigure(0, weight=1)
 
         ctk.CTkLabel(
@@ -340,24 +379,61 @@ class DeviceControlDialog(ctk.CTkToplevel):
             font=ctk.CTkFont(size=11, family="Consolas"), text_color=COLORS["text_faint"],
         ).grid(row=2, column=0, sticky="ew", padx=PAD, pady=(0, GAP))
 
-        actions = ctk.CTkScrollableFrame(self, fg_color="transparent")
-        actions.grid(row=3, column=0, sticky="nsew", padx=PAD - 4, pady=0)
-        actions.grid_columnconfigure(0, weight=1)
+        self._actions = ctk.CTkScrollableFrame(self, fg_color="transparent")
+        self._actions.grid(row=3, column=0, sticky="nsew", padx=PAD - 4, pady=0)
+        self._actions.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(3, weight=1)
+        self._build_actions()
 
-        controls = controls_for(device, app.browser_cfg)
+        # Editing bar: manage the device itself (config-writing actions).
+        bar = ctk.CTkFrame(self, fg_color="transparent")
+        bar.grid(row=4, column=0, sticky="ew", padx=PAD, pady=(GAP, 0))
+        bar.grid_columnconfigure(0, weight=1)
+        ctk.CTkButton(
+            bar, text="Edit Device", width=110, command=self._edit_device,
+            fg_color="transparent", hover_color=COLORS["card_hover"],
+            border_width=1, border_color=COLORS["border"], text_color=COLORS["text"],
+            font=ctk.CTkFont(size=12),
+        ).grid(row=0, column=1, padx=(0, GAP))
+        ctk.CTkButton(
+            bar, text="Remove", width=90, command=self._remove_device,
+            fg_color="transparent", hover_color=COLORS["card_hover"],
+            border_width=1, border_color=COLORS["offline"], text_color=COLORS["offline"],
+            font=ctk.CTkFont(size=12),
+        ).grid(row=0, column=2)
+
+        self._status = ctk.CTkLabel(
+            self, text="", anchor="w",
+            font=ctk.CTkFont(size=12), text_color=COLORS["text_muted"],
+        )
+        self._status.grid(row=5, column=0, sticky="ew", padx=PAD, pady=(GAP, PAD))
+
+        self.after(60, self._focus)
+
+    def _build_actions(self) -> None:
+        """(Re)build the list of control buttons from the device's controls."""
+
+        for child in self._actions.winfo_children():
+            child.destroy()
+
+        controls = controls_for(self.device, self.app.browser_cfg)
+        row = 0
         if not controls:
             ctk.CTkLabel(
-                actions,
-                text="No control actions configured for this device.\n"
-                     "Add a \"commands\" list to it in your config to add buttons.",
+                self._actions,
+                text="No control buttons yet.\n"
+                     "Use “Add Command” below to create one.",
                 anchor="w", justify="left",
                 font=ctk.CTkFont(size=12), text_color=COLORS["text_muted"],
-            ).grid(row=0, column=0, sticky="ew", padx=8, pady=8)
-        for index, control in enumerate(controls):
+            ).grid(row=row, column=0, sticky="ew", padx=8, pady=8)
+            row += 1
+        for control in controls:
             is_web = control.kind == "web"
+            line = ctk.CTkFrame(self._actions, fg_color="transparent")
+            line.grid(row=row, column=0, sticky="ew", pady=4)
+            line.grid_columnconfigure(0, weight=1)
             ctk.CTkButton(
-                actions,
+                line,
                 text=control.label,
                 height=40,
                 corner_radius=CORNER,
@@ -368,15 +444,53 @@ class DeviceControlDialog(ctk.CTkToplevel):
                 border_color=COLORS["border"],
                 font=ctk.CTkFont(size=13, weight="bold"),
                 command=lambda c=control: self._run_control(c),
-            ).grid(row=index, column=0, sticky="ew", padx=8, pady=4)
+            ).grid(row=0, column=0, sticky="ew", padx=(8, 0))
+            # Config-driven commands get an inline "edit" affordance.
+            if control.source is not None:
+                ctk.CTkButton(
+                    line, text="✎", width=40, height=40, corner_radius=CORNER,
+                    fg_color="transparent", hover_color=COLORS["card_hover"],
+                    border_width=1, border_color=COLORS["border"],
+                    text_color=COLORS["text_muted"],
+                    command=lambda s=control.source: self._edit_command(s),
+                ).grid(row=0, column=1, padx=(6, 8))
+            row += 1
 
-        self._status = ctk.CTkLabel(
-            self, text="", anchor="w",
-            font=ctk.CTkFont(size=12), text_color=COLORS["text_muted"],
-        )
-        self._status.grid(row=4, column=0, sticky="ew", padx=PAD, pady=(GAP, PAD))
+        # Always-present "add a command" button at the end of the list.
+        ctk.CTkButton(
+            self._actions, text="＋  Add Command", height=38, corner_radius=CORNER,
+            fg_color="transparent", hover_color=COLORS["card_hover"],
+            border_width=1, border_color=COLORS["accent"], text_color=COLORS["accent"],
+            font=ctk.CTkFont(size=13, weight="bold"),
+            command=self._add_command,
+        ).grid(row=row, column=0, sticky="ew", padx=8, pady=(8, 4))
 
-        self.after(60, self._focus)
+    def _add_command(self) -> None:
+        CommandEditorDialog(self.app, self.device, on_saved=self._build_actions)
+
+    def _edit_command(self, spec: dict) -> None:
+        CommandEditorDialog(self.app, self.device, spec, on_saved=self._build_actions)
+
+    def _edit_device(self) -> None:
+        room = self.app.current_room
+        if room is None:
+            return
+        self.destroy()
+        DeviceEditorDialog(self.app, room, self.device)
+
+    def _remove_device(self) -> None:
+        room = self.app.current_room
+        if room is None:
+            return
+        if not messagebox.askyesno(
+            __app_name__, f"Remove '{self.device.name}' from this room?", parent=self
+        ):
+            return
+        if self.device in room.devices:
+            room.devices.remove(self.device)
+        if self.app.persist_config():
+            self.app.refresh_current_room()
+            self.destroy()
 
     def _focus(self) -> None:
         try:
@@ -386,6 +500,18 @@ class DeviceControlDialog(ctk.CTkToplevel):
         except Exception:
             pass
 
+    def _set_status(self, text: str, text_color: str | None = None, duration_ms: int = 5000) -> None:
+        if self._status_clear_job:
+            self.after_cancel(self._status_clear_job)
+            self._status_clear_job = None
+        self._status.configure(text=text, text_color=text_color or COLORS["text_muted"])
+        if duration_ms > 0:
+            self._status_clear_job = self.after(duration_ms, self._clear_status)
+
+    def _clear_status(self) -> None:
+        self._status.configure(text="", text_color=COLORS["text_muted"])
+        self._status_clear_job = None
+
     def _run_control(self, control: DeviceControl) -> None:
         value = None
         if control.prompt:
@@ -393,11 +519,11 @@ class DeviceControlDialog(ctk.CTkToplevel):
             value = dialog.get_input()
             if value is None:  # cancelled
                 return
-        self._status.configure(text=f"Running “{control.label}”…", text_color=COLORS["text_muted"])
+        self._set_status(f"Running “{control.label}”…", duration_ms=0)
 
         def on_done(ok: bool, message: str) -> None:
-            self._status.configure(
-                text=message,
+            self._set_status(
+                message,
                 text_color=COLORS["online"] if ok else COLORS["offline"],
             )
 
@@ -432,15 +558,6 @@ class SettingsDialog(ctk.CTkToplevel):
                 body, text=text, anchor="w",
                 font=ctk.CTkFont(size=13), text_color=COLORS["text"],
             ).grid(row=row, column=0, sticky="w", padx=(0, GAP), pady=8)
-
-        # Appearance
-        label("Appearance")
-        self._appearance = ctk.StringVar(value=self.app_state.appearance or "dark")
-        ctk.CTkOptionMenu(
-            body, values=["dark", "light", "system"], variable=self._appearance,
-            command=lambda v: ctk.set_appearance_mode(v),
-            fg_color=COLORS["card"], button_color=COLORS["card_hover"],
-        ).grid(row=row, column=1, sticky="ew", pady=8); row += 1
 
         # Ping timeout
         label("Status check timeout (seconds)")
@@ -524,14 +641,12 @@ class SettingsDialog(ctk.CTkToplevel):
             messagebox.showerror(__app_name__, "Auto-refresh interval must be a whole number.")
             return
 
-        self.app_state.appearance = self._appearance.get()
         self.app_state.ping_timeout_seconds = timeout
         self.app_state.auto_refresh_seconds = refresh
         self.app_state.browser_path = self._browser.get().strip()
         self.app_state.browser_new_window = bool(self._new_window.get())
         self.app_state.save()
 
-        ctk.set_appearance_mode(self.app_state.appearance)
         self.app.apply_settings()
         self.destroy()
 
@@ -573,6 +688,7 @@ class App(ctk.CTk):
         self._poll_interval_ms = 40
         # Auto-refresh + config-switch state.
         self._auto_refresh_job: str | None = None
+        self._statusbar_clear_job: str | None = None
         self.requested_config: Path | None = None
 
         # --- Window chrome -------------------------------------------------- #
@@ -603,6 +719,15 @@ class App(ctk.CTk):
     # Sidebar
     # ------------------------------------------------------------------ #
     def _build_sidebar(self) -> None:
+        # Allow a full rebuild after rooms are added/removed/renamed: tear down
+        # the previous sidebar and reset the per-build widget bookkeeping.
+        existing = getattr(self, "_sidebar_frame", None)
+        if existing is not None:
+            existing.destroy()
+        self._room_buttons = []
+        self._city_groups = []
+        self._selected_button = None
+
         sidebar = ctk.CTkFrame(
             self,
             width=SIDEBAR_WIDTH,
@@ -612,6 +737,7 @@ class App(ctk.CTk):
         sidebar.grid(row=0, column=0, sticky="nsew")
         sidebar.grid_propagate(False)
         sidebar.grid_rowconfigure(3, weight=1)  # room list expands
+        self._sidebar_frame = sidebar
 
         # Brand / title block.
         brand = ctk.CTkFrame(sidebar, fg_color="transparent")
@@ -631,15 +757,24 @@ class App(ctk.CTk):
             text_color=COLORS["text_faint"],
         ).pack(anchor="w")
 
-        # "ROOMS" section label + count.
+        # "ROOMS" section label + count, with an Add Room (+) button.
+        rooms_header = ctk.CTkFrame(sidebar, fg_color="transparent")
+        rooms_header.grid(row=1, column=0, sticky="ew", padx=PAD + 4, pady=(PAD, 6))
+        rooms_header.grid_columnconfigure(0, weight=1)
         self._rooms_label = ctk.CTkLabel(
-            sidebar,
+            rooms_header,
             text=f"ROOMS  ({len(self.site.rooms)})",
             anchor="w",
             font=ctk.CTkFont(size=11, weight="bold"),
             text_color=COLORS["text_faint"],
         )
-        self._rooms_label.grid(row=1, column=0, sticky="ew", padx=PAD + 4, pady=(PAD, 6))
+        self._rooms_label.grid(row=0, column=0, sticky="ew")
+        ctk.CTkButton(
+            rooms_header, text="＋ Add", width=58, height=24, corner_radius=CORNER,
+            fg_color="transparent", hover_color=COLORS["card_hover"],
+            border_width=1, border_color=COLORS["border"], text_color=COLORS["text_muted"],
+            font=ctk.CTkFont(size=12), command=self.add_room,
+        ).grid(row=0, column=1, sticky="e")
 
         # Search/filter box — essential once there are ~115 rooms.
         self._search_var = ctk.StringVar()
@@ -683,13 +818,14 @@ class App(ctk.CTk):
         footer = ctk.CTkFrame(sidebar, fg_color="transparent")
         footer.grid(row=4, column=0, sticky="ew", padx=PAD, pady=(6, PAD))
         source = self.config_path.name if self.config_path else "example data"
-        ctk.CTkLabel(
+        self._config_footer_label = ctk.CTkLabel(
             footer,
             text=f"config: {source}",
             anchor="w",
             font=ctk.CTkFont(size=11, family="Consolas"),
             text_color=COLORS["text_faint"],
-        ).pack(anchor="w")
+        )
+        self._config_footer_label.pack(anchor="w")
         ctk.CTkLabel(
             footer,
             text=f"v{__version__}",
@@ -763,6 +899,37 @@ class App(ctk.CTk):
             command=self.on_open_web_uis,
         )
         self._open_btn.pack(side="right", padx=(0, GAP))
+        # Add a device to / edit the current room (config-writing actions).
+        self._add_device_btn = ctk.CTkButton(
+            actions,
+            text="＋ Device",
+            width=110,
+            height=40,
+            corner_radius=CORNER,
+            fg_color="transparent",
+            hover_color=COLORS["card_hover"],
+            border_width=1,
+            border_color=COLORS["border"],
+            text_color=COLORS["text"],
+            font=ctk.CTkFont(size=14),
+            command=self.add_device,
+        )
+        self._add_device_btn.pack(side="right", padx=(0, GAP))
+        self._edit_room_btn = ctk.CTkButton(
+            actions,
+            text="✎",
+            width=40,
+            height=40,
+            corner_radius=CORNER,
+            fg_color="transparent",
+            hover_color=COLORS["card_hover"],
+            border_width=1,
+            border_color=COLORS["border"],
+            text_color=COLORS["text"],
+            font=ctk.CTkFont(size=16),
+            command=self.edit_current_room,
+        )
+        self._edit_room_btn.pack(side="right", padx=(0, GAP))
         # Settings gear (far left of the action cluster).
         self._settings_btn = ctk.CTkButton(
             actions,
@@ -819,7 +986,11 @@ class App(ctk.CTk):
         # city group is still collapsed/unbuilt, register_room_buttons() will
         # apply the highlight when the group is expanded.
         target = next((b for b in self._room_buttons if b.room is room), None)
-        self._mark_selected(target)
+        if target is None and self._city_groups:
+            # Programmatic selection of a room in a collapsed group: reveal it.
+            self._select_in_sidebar(room)
+        else:
+            self._mark_selected(target)
         self._render_room(room)
 
     def _mark_selected(self, button: RoomButton | None) -> None:
@@ -850,6 +1021,11 @@ class App(ctk.CTk):
         bits = [b for b in (room.location, f"{room.device_count} devices") if b]
         self._room_subtitle.configure(text="   ·   ".join(bits))
 
+        # A room is selected: room-scoped editing actions are available.
+        self._edit_room_btn.configure(state="normal")
+        self._add_device_btn.configure(state="normal")
+        self._check_btn.configure(state="normal")
+
         # Web-UI action: reflect how many devices are openable in this room.
         web_count = len(room.web_devices())
         if web_count:
@@ -858,6 +1034,13 @@ class App(ctk.CTk):
             self._open_btn.configure(text="Open Web UIs", state="disabled")
 
         self._device_cards.clear()
+
+        # Empty room: guide the user straight to adding their first device.
+        hint = self._get_empty_hint()
+        if room.device_count == 0:
+            hint.grid(row=0, column=0, columnspan=GRID_COLUMNS, sticky="ew", pady=GAP)
+        else:
+            hint.grid_remove()
 
         # Lay out using pooled widgets — rebind content instead of recreating,
         # so a room switch is O(devices) cheap reconfigures, not widget builds.
@@ -918,6 +1101,31 @@ class App(ctk.CTk):
             )
         return self._section_pool[index]
 
+    def _get_empty_hint(self) -> ctk.CTkFrame:
+        """The 'this room has no devices yet' placeholder (built once)."""
+
+        hint = getattr(self, "_empty_hint", None)
+        if hint is None:
+            hint = ctk.CTkFrame(
+                self._grid, fg_color=COLORS["card"], corner_radius=CORNER,
+                border_width=1, border_color=COLORS["border"],
+            )
+            ctk.CTkLabel(
+                hint, text="No devices in this room yet.",
+                font=ctk.CTkFont(size=14, weight="bold"), text_color=COLORS["text"],
+            ).pack(anchor="w", padx=PAD, pady=(PAD, 2))
+            ctk.CTkLabel(
+                hint, text="Add the AV equipment installed here to monitor and control it.",
+                font=ctk.CTkFont(size=12), text_color=COLORS["text_muted"],
+            ).pack(anchor="w", padx=PAD)
+            ctk.CTkButton(
+                hint, text="＋  Add a device", height=40, corner_radius=CORNER,
+                fg_color=COLORS["accent"], hover_color=COLORS["accent_hover"],
+                font=ctk.CTkFont(size=13, weight="bold"), command=self.add_device,
+            ).pack(anchor="w", padx=PAD, pady=PAD)
+            self._empty_hint = hint
+        return hint
+
     def _filter_rooms(self) -> None:
         """Filter sidebar rooms by the search box (name/city/location/id)."""
 
@@ -944,8 +1152,22 @@ class App(ctk.CTk):
     def _show_empty_state(self) -> None:
         self._room_title.configure(text="No rooms configured")
         self._room_subtitle.configure(
-            text="Your config.json contains no rooms."
+            text="Use “＋ Add” in the sidebar to create your first room."
         )
+        # Nothing to act on: dim every room-scoped action.
+        for btn in (self._open_btn, self._check_btn,
+                    self._add_device_btn, self._edit_room_btn):
+            btn.configure(state="disabled")
+        # Clear any device widgets left over from a previously-selected room.
+        self._device_cards.clear()
+        for card in self._card_pool:
+            card.grid_remove()
+        for section in self._section_pool:
+            section.grid_remove()
+        hint = getattr(self, "_empty_hint", None)
+        if hint is not None:
+            hint.grid_remove()
+        self._update_statusbar()
 
     # ------------------------------------------------------------------ #
     # Status indicator API (Step 4 ping worker calls these)
@@ -959,6 +1181,14 @@ class App(ctk.CTk):
             card.refresh()
         self._update_statusbar()
 
+    def _refresh_room_health(self, room: Room) -> None:
+        """Update the sidebar dot for *room* to reflect its current health."""
+
+        for btn in self._room_buttons:
+            if btn.room is room:
+                btn.refresh_health()
+                return
+
     def set_room_status(self, status: DeviceStatus) -> None:
         """Bulk-set every device in the current room to a status."""
 
@@ -969,8 +1199,12 @@ class App(ctk.CTk):
         for card in self._device_cards.values():
             card.refresh()
         self._update_statusbar()
+        self._refresh_room_health(self.current_room)
 
     def _update_statusbar(self) -> None:
+        if self._statusbar_clear_job:
+            self.after_cancel(self._statusbar_clear_job)
+            self._statusbar_clear_job = None
         if not self.current_room:
             self._statusbar.configure(text="")
             return
@@ -985,6 +1219,14 @@ class App(ctk.CTk):
         if checking:
             text += f"   ·   checking {checking}…"
         self._statusbar.configure(text=text)
+
+    def _set_statusbar(self, text: str, duration_ms: int = 5000) -> None:
+        if self._statusbar_clear_job:
+            self.after_cancel(self._statusbar_clear_job)
+            self._statusbar_clear_job = None
+        self._statusbar.configure(text=text)
+        if duration_ms > 0:
+            self._statusbar_clear_job = self.after(duration_ms, self._update_statusbar)
 
     # ------------------------------------------------------------------ #
     # Actions
@@ -1001,9 +1243,7 @@ class App(ctk.CTk):
             return
         urls = self.current_room.web_urls()
         if not urls:
-            self._statusbar.configure(
-                text="No web-accessible devices in this room."
-            )
+            self._set_statusbar("No web-accessible devices in this room.")
             return
 
         if len(urls) > self._web_confirm_threshold:
@@ -1020,8 +1260,8 @@ class App(ctk.CTk):
             where = Path(self.browser_cfg.path).stem or "browser"
         elif self.browser_cfg.name:
             where = self.browser_cfg.name
-        self._statusbar.configure(
-            text=f"Opening {opened} web UI(s) for '{self.current_room.name}' in {where}…"
+        self._set_statusbar(
+            f"Opening {opened} web UI(s) for '{self.current_room.name}' in {where}…"
         )
 
     def on_check_status(self) -> None:
@@ -1037,7 +1277,7 @@ class App(ctk.CTk):
         room = self.current_room
         devices = list(room.devices)
         if not devices:
-            self._statusbar.configure(text="No devices to check in this room.")
+            self._set_statusbar("No devices to check in this room.")
             return
 
         # New run: bump the generation so any stragglers from a prior run are
@@ -1101,6 +1341,7 @@ class App(ctk.CTk):
             if card is not None and card.device is device:
                 card.refresh()
             self._update_statusbar()
+            self._refresh_room_health(room)
 
     def _finish_check(self, generation: int) -> None:
         if generation != self._check_gen:
@@ -1108,6 +1349,8 @@ class App(ctk.CTk):
         self._checking = False
         self._check_btn.configure(state="normal", text="Check Status")
         self._update_statusbar()
+        if self._checking_room:
+            self._refresh_room_health(self._checking_room)
 
     # ------------------------------------------------------------------ #
     # Effective settings (state overrides config)
@@ -1169,6 +1412,92 @@ class App(ctk.CTk):
     def open_settings(self) -> None:
         SettingsDialog(self)
 
+    # ------------------------------------------------------------------ #
+    # Config editing (add/remove/edit rooms, devices, commands)
+    # ------------------------------------------------------------------ #
+    def persist_config(self) -> bool:
+        """Write the current in-memory site back to the config file.
+
+        When viewing demo data (no config path yet), prompts for a location to
+        save to first — turning the demo into the user's own editable config.
+        Returns ``True`` on success.
+        """
+
+        if self.config_path is None:
+            chosen = filedialog.asksaveasfilename(
+                title="Save configuration as…",
+                defaultextension=".json",
+                initialfile="config.json",
+                filetypes=[("JSON config", "*.json"), ("All files", "*.*")],
+            )
+            if not chosen:
+                return False
+            self.config_path = Path(chosen)
+
+        try:
+            save_config(self.config_path, self.site.to_dict())
+        except (ConfigError, OSError) as exc:
+            messagebox.showerror(
+                __app_name__, f"Could not save your configuration:\n\n{exc}"
+            )
+            return False
+
+        self.app_state.remember_config(self.config_path)
+        self.app_state.save()
+        self._refresh_config_footer()
+        return True
+
+    def add_room(self) -> None:
+        RoomEditorDialog(self)
+
+    def edit_current_room(self) -> None:
+        if self.current_room is not None:
+            RoomEditorDialog(self, self.current_room)
+
+    def add_device(self) -> None:
+        if self.current_room is not None:
+            DeviceEditorDialog(self, self.current_room)
+
+    def refresh_sidebar(self) -> None:
+        """Rebuild the room list (after add/remove/rename) and restore selection."""
+
+        self._build_sidebar()
+        if self.current_room is not None and self.current_room in self.site.rooms:
+            self._select_in_sidebar(self.current_room)
+
+    def _select_in_sidebar(self, room: Room) -> None:
+        """Expand the room's city group (if any) and highlight its button."""
+
+        for group in self._city_groups:
+            if room in group.rooms:
+                group.set_collapsed(False)  # builds the buttons
+                break
+        target = next((b for b in self._room_buttons if b.room is room), None)
+        if target is not None:
+            self._mark_selected(target)
+
+    def refresh_current_room(self) -> None:
+        """Re-render the current room after its devices changed."""
+
+        if self.current_room is not None:
+            self._render_room(self.current_room)
+            self._refresh_room_health(self.current_room)
+
+    def select_first_or_empty(self) -> None:
+        """After a deletion, fall back to the first room or the empty state."""
+
+        self.current_room = None
+        self._selected_button = None
+        if self.site.rooms:
+            self.select_room(self.site.rooms[0])
+        else:
+            self._show_empty_state()
+
+    def _refresh_config_footer(self) -> None:
+        if getattr(self, "_config_footer_label", None) is not None:
+            source = self.config_path.name if self.config_path else "example data"
+            self._config_footer_label.configure(text=f"config: {source}")
+
     def switch_config_dialog(self) -> None:
         """Pick a different config and soft-restart onto it (see ``main``)."""
 
@@ -1189,7 +1518,7 @@ class App(ctk.CTk):
         self._reschedule_auto_refresh()
         if self.app_state.auto_refresh_enabled:
             secs = self.app_state.auto_refresh_seconds or 60
-            self._statusbar.configure(text=f"Auto-refresh every {secs}s is on.")
+            self._set_statusbar(f"Auto-refresh every {secs}s is on.")
 
     def _reschedule_auto_refresh(self) -> None:
         if self._auto_refresh_job is not None:
