@@ -641,6 +641,21 @@ class Site:
         except (TypeError, ValueError):
             return 2.0
 
+    @property
+    def max_concurrent_checks(self) -> int:
+        """Config-level cap on simultaneous status probes (0 = use the default).
+
+        Lets a large deployment tune how many connections a sweep opens at once
+        without code changes; an app-state preference overrides it (see
+        ``app._effective_concurrency``).
+        """
+
+        try:
+            value = int(self.settings.get("max_concurrent_checks", 0))
+        except (TypeError, ValueError):
+            return 0
+        return value if value > 0 else 0
+
     def get_room(self, room_id: str) -> Room | None:
         return next((r for r in self.rooms if r.id == room_id), None)
 

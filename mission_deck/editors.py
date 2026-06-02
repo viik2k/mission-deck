@@ -1,4 +1,4 @@
-"""Config-editing dialogs — add/remove/edit rooms, devices and commands.
+﻿"""Config-editing dialogs — add/remove/edit rooms, devices and commands.
 
 This is the layer that lets a non-technical user manage the equipment estate
 *without ever opening config.json in a text editor*. Every dialog here:
@@ -215,9 +215,9 @@ class RoomEditorDialog(_FormDialog):
             geometry="480x560",
         )
 
-        self._name = self._entry(
+        self._name_var = self._entry(
             "Room name", room.name if editing else "",
-            hint="Shown in the sidebar, e.g. “Courtroom 1A”.",
+            hint='Shown in the sidebar, e.g. "Courtroom 1A".',
             placeholder="Courtroom 1A",
         )
         self._id = self._entry(
@@ -250,7 +250,7 @@ class RoomEditorDialog(_FormDialog):
         return {r.id for r in self.app.site.rooms if r is not self.room}
 
     def _save(self) -> None:
-        name = self._name.get().strip()
+        name = self._name_var.get().strip()
         if not name:
             self._error("Please enter a room name.")
             return
@@ -334,9 +334,9 @@ class DeviceEditorDialog(_FormDialog):
 
         d = device
         type_values = sorted(registered_device_types().keys())
-        self._name = self._entry(
+        self._name_var = self._entry(
             "Device name", d.name if d else "",
-            hint="Shown on the device card, e.g. “Judge Bench PTZ Camera”.",
+            hint='Shown on the device card, e.g. "Judge Bench PTZ Camera".',
             placeholder="Judge Bench PTZ Camera",
         )
         self._id = self._entry(
@@ -374,7 +374,7 @@ class DeviceEditorDialog(_FormDialog):
             hint="Comma-separated labels, e.g. camera, video.",
         )
 
-        # Advanced web-UI overrides (used by “Open Web UIs”). Optional.
+        # Advanced web-UI overrides (used by "Open Web UIs"). Optional.
         extra = d.extra if d else {}
         self._web_url = self._entry(
             "Web UI URL (optional)", str(extra.get("web_url", "")),
@@ -409,7 +409,7 @@ class DeviceEditorDialog(_FormDialog):
     def _collect(self) -> dict | None:
         """Build a validated device dict from the form, or None on error."""
 
-        name = self._name.get().strip()
+        name = self._name_var.get().strip()
         if not name:
             self._error("Please enter a device name.")
             return None
@@ -550,7 +550,7 @@ class CommandEditorDialog(_FormDialog):
 
         self._label = self._entry(
             "Button label", str(c.get("label", "")),
-            hint="The text shown on the control button, e.g. “Power On”.",
+            hint='The text shown on the control button, e.g. "Power On".',
             placeholder="Power On",
         )
         self._id = self._entry(
@@ -668,7 +668,7 @@ class CommandEditorDialog(_FormDialog):
     def _delete(self) -> None:
         if self.command is None:
             return
-        if not self._confirm(f"Delete the “{self.command.get('label', '')}” command?"):
+        if not self._confirm(f"Delete the \"{self.command.get('label', '')}\" command?"):
             return
         commands = self._commands()
         if self.command in commands:

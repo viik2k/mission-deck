@@ -30,8 +30,9 @@ import ssl
 import time
 import urllib.error
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from typing import Any, Callable, Iterable, Mapping, Sequence
+from typing import Any, Awaitable, Callable, Iterable, Mapping, Sequence
 
 from .models import Device, DeviceStatus, RecordingStatus
 
@@ -48,7 +49,66 @@ class CheckResult:
     error: str | None = None
 
 
-async def check_device(device: Device, timeout: float) -> CheckResult:
+# --------------------------------------------------------------------------- #
+# Monitor registry ("monitoring plugins")
+# --------------------------------------------------------------------------- #
+# A *monitor* answers "is this device healthy right now?" and returns a
+# :class:`CheckResult`. The default ``tcp`` monitor opens a TCP connection (the
+# original behaviour); ``http`` issues a request and treats any answered
+# endpoint as up. New check types register with :func:`register_monitor` — the
+# same extensibility seam as ``@register_device`` in ``models.py`` — and a
+# device opts in with a ``"monitor"`` key in its config (falling back to ``tcp``).
+MonitorFn = Callable[[Device, float], Awaitable[CheckResult]]
+
+_MONITOR_REGISTRY: dict[str, MonitorFn] = {}
+
+# The monitor used when a device names none. Kept tcp so every existing config
+# behaves exactly as before this registry existed.
+DEFAULT_MONITOR = "tcp"
+
+
+def register_monitor(*names: str) -> Callable[[MonitorFn], MonitorFn]:
+    """Register an async monitor function under one or more names.
+
+    Example
+    -------
+    >>> @register_monitor("ping")
+    ... async def ping_monitor(device, timeout):
+    ...     ...
+    """
+
+    def decorator(fn: MonitorFn) -> MonitorFn:
+        for name in names:
+            key = name.strip().lower()
+            if key in _MONITOR_REGISTRY:
+                raise ValueError(f"monitor {key!r} is already registered")
+            _MONITOR_REGISTRY[key] = fn
+        return fn
+
+    return decorator
+
+
+def monitor_name_for(device: Device) -> str:
+    """The monitor name a device wants, or :data:`DEFAULT_MONITOR`.
+
+    An explicit ``"monitor"`` config key wins; otherwise we keep the historical
+    behaviour of a TCP-connect probe regardless of protocol.
+    """
+
+    name = device.extra.get("monitor")
+    if isinstance(name, str) and name.strip().lower() in _MONITOR_REGISTRY:
+        return name.strip().lower()
+    return DEFAULT_MONITOR
+
+
+def registered_monitors() -> dict[str, MonitorFn]:
+    """Read-only view of the registered monitor names (handy for tests/UI)."""
+
+    return dict(_MONITOR_REGISTRY)
+
+
+@register_monitor("tcp")
+async def _tcp_monitor(device: Device, timeout: float) -> CheckResult:
     """Probe one device with a TCP connect, bounded by ``timeout`` seconds."""
 
     port = device.port
@@ -81,16 +141,73 @@ async def check_device(device: Device, timeout: float) -> CheckResult:
     return CheckResult(device.id, DeviceStatus.ONLINE, latency_ms, None)
 
 
+@register_monitor("http", "https")
+async def _http_monitor(device: Device, timeout: float) -> CheckResult:
+    """Probe a device over HTTP(S): any *answered* endpoint counts as online.
+
+    The URL is taken from an explicit ``health_url`` config key, falling back to
+    the device's :pyattr:`~mission_deck.models.Device.web_url`. A reachable
+    server (even one returning 4xx/5xx) means the box is up; only a transport
+    failure (DNS/refused/timeout) is OFFLINE. Self-signed-cert codecs can set
+    ``verify_tls: false`` to skip certificate verification.
+
+    Falls back to the TCP monitor when no URL can be resolved, so a misconfigured
+    device still gets a sensible reachability answer.
+    """
+
+    health = device.extra.get("health_url")
+    url = health.strip() if isinstance(health, str) and health.strip() else device.web_url
+    if not url:
+        return await _tcp_monitor(device, timeout)
+
+    verify_tls = bool(device.extra.get("verify_tls", True))
+    start = time.perf_counter()
+    try:
+        # http_request is blocking (urllib); run it off the event loop so other
+        # probes in the same gather() keep going concurrently.
+        await asyncio.to_thread(http_request, url, timeout=timeout, verify_tls=verify_tls)
+    except ControlError as exc:
+        logger.debug("HTTP probe %s (%s) failed: %s", device.id, url, exc)
+        return CheckResult(device.id, DeviceStatus.OFFLINE, None, str(exc) or "unreachable")
+
+    latency_ms = (time.perf_counter() - start) * 1000.0
+    logger.debug("HTTP probe %s (%s) online in %.0fms", device.id, url, latency_ms)
+    return CheckResult(device.id, DeviceStatus.ONLINE, latency_ms, None)
+
+
+async def check_device(device: Device, timeout: float) -> CheckResult:
+    """Probe one device using its configured monitor (TCP connect by default)."""
+
+    monitor = _MONITOR_REGISTRY.get(monitor_name_for(device), _tcp_monitor)
+    return await monitor(device, timeout)
+
+
+# How many device probes may be in flight at once. The estate-wide sweep can
+# span the whole site (thousands of devices); firing them all simultaneously
+# would exhaust file descriptors, flood the network with a SYN burst and stall
+# the host. A semaphore caps concurrency so a sweep of any size runs as a
+# steady, bounded stream of checks. Tunable per deployment via the
+# ``max_concurrent_checks`` app/config setting (see ``app._effective_concurrency``).
+DEFAULT_MAX_CONCURRENCY = 128
+
+
 async def _check_all(
     devices: list[Device],
     timeout: float,
     publish: Callable[[CheckResult], None],
+    concurrency: int,
 ) -> None:
+    semaphore = asyncio.Semaphore(concurrency)
+
     async def probe(device: Device) -> None:
-        result = await check_device(device, timeout)
+        # Hold the slot only for the probe itself; publish (a cheap queue put)
+        # happens after release so a slow callback can't throttle throughput.
+        async with semaphore:
+            result = await check_device(device, timeout)
         publish(result)
 
-    # All probes run concurrently; publish fires as each finishes.
+    # Probes run concurrently up to ``concurrency``; publish fires as each
+    # finishes, so results still stream to the UI live rather than in a batch.
     await asyncio.gather(*(probe(d) for d in devices))
 
 
@@ -98,23 +215,36 @@ def run_status_checks(
     devices: Iterable[Device],
     timeout: float,
     publish: Callable[[CheckResult], None],
+    concurrency: int = DEFAULT_MAX_CONCURRENCY,
 ) -> None:
     """Blocking driver — run this on a worker thread.
 
-    Probes every device concurrently, invoking ``publish(result)`` as each
-    completes. Returns once all probes are done.
+    Probes every device with **at most** ``concurrency`` checks in flight at
+    once, invoking ``publish(result)`` as each completes. Returns once all
+    probes are done. Bounding concurrency is what lets an estate-wide sweep of
+    thousands of devices run without exhausting sockets or stalling the host.
     """
 
     device_list = list(devices)
     if not device_list:
         return
+    concurrency = max(1, min(concurrency, len(device_list)))
 
     # A dedicated event loop for this worker thread (we are never on the main
-    # thread here, so there is no running loop to clash with).
+    # thread here, so there is no running loop to clash with). The HTTP monitor
+    # offloads its blocking urllib call via ``asyncio.to_thread``; size the
+    # default executor to match ``concurrency`` so those probes are genuinely
+    # parallel rather than queueing behind the stdlib default (~32 workers).
     loop = asyncio.new_event_loop()
+    loop.set_default_executor(
+        ThreadPoolExecutor(max_workers=concurrency, thread_name_prefix="md-probe")
+    )
     try:
-        loop.run_until_complete(_check_all(device_list, timeout, publish))
+        loop.run_until_complete(_check_all(device_list, timeout, publish, concurrency))
     finally:
+        # Wind the executor down before closing the loop so no probe thread is
+        # left running against a closed loop.
+        loop.run_until_complete(loop.shutdown_default_executor())
         loop.close()
 
 

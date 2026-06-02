@@ -79,6 +79,12 @@ def recording_status_label(status: RecordingStatus) -> str:
     return RECORDING_STATUS_LABELS.get(status, "Unknown")
 
 
+# KPI summary accents (reuse the status palette so colours stay consistent).
+KPI_GOOD = COLORS["online"]
+KPI_BAD = COLORS["offline"]
+KPI_NEUTRAL = COLORS["text_muted"]
+
+
 # --------------------------------------------------------------------------- #
 # Sizing / layout tokens
 # --------------------------------------------------------------------------- #

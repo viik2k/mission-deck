@@ -165,7 +165,9 @@ def log_dir() -> Path | None:
 # --------------------------------------------------------------------------- #
 # Audit trail
 # --------------------------------------------------------------------------- #
-def _current_user() -> str:
+def current_user() -> str:
+    """The operator name recorded against audit events (the OS login)."""
+
     try:
         return getpass.getuser()
     except Exception:  # getuser can raise if no username is resolvable
@@ -184,7 +186,7 @@ def audit(event: str, **fields: Any) -> None:
     record = {
         "ts": datetime.now(timezone.utc).isoformat(timespec="milliseconds"),
         "event": event,
-        "user": _current_user(),
+        "user": current_user(),
     }
     for key, value in fields.items():
         record[key] = value if _json_safe(value) else str(value)
@@ -196,6 +198,46 @@ def audit(event: str, **fields: Any) -> None:
 
 def _json_safe(value: Any) -> bool:
     return isinstance(value, (str, int, float, bool, type(None), list, dict))
+
+
+def audit_log_path() -> Path | None:
+    """Path to the current audit log, or ``None`` if file logging is disabled."""
+
+    return (_log_dir / AUDIT_FILENAME) if _log_dir is not None else None
+
+
+def tail_audit(limit: int = 20) -> list[dict[str, Any]]:
+    """Return up to ``limit`` most-recent audit events, newest first.
+
+    Reads the JSON-lines audit log for the dashboard's activity feed. Best-effort
+    and read-only: a missing file, an I/O error, or a malformed line is simply
+    skipped — this must never raise into the UI.
+    """
+
+    path = audit_log_path()
+    if path is None:
+        return []
+    try:
+        with path.open("r", encoding="utf-8", errors="replace") as handle:
+            lines = handle.readlines()
+    except OSError as exc:
+        logger.debug("Could not read audit log %s: %s", path, exc)
+        return []
+
+    events: list[dict[str, Any]] = []
+    for line in reversed(lines):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            record = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(record, dict):
+            events.append(record)
+        if len(events) >= limit:
+            break
+    return events
 
 
 # --------------------------------------------------------------------------- #

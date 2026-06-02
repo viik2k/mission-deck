@@ -37,13 +37,21 @@ class AppState:
 
     last_config_path: str | None = None
     recent_configs: list[str] = field(default_factory=list)
-    # Preference overrides (None / "" means "fall back to the config file").
+    # Preference overrides (None / "" / 0 means "fall back to the config file").
     ping_timeout_seconds: float | None = None
+    # Max simultaneous status probes (0 = use the config/built-in default). The
+    # ceiling on how many connections a sweep opens at once — see network.py.
+    max_concurrent_checks: int = 0
     auto_refresh_enabled: bool = False
     auto_refresh_seconds: int = 60
     browser_path: str = ""
     browser_new_window: bool = True
     appearance: str = "dark"  # "dark" | "light" | "system"
+    # Dashboard / estate-wide monitoring.
+    start_on_dashboard: bool = True       # open on the overview instead of a room
+    dashboard_poll_enabled: bool = False  # background estate-wide status sweeps
+    dashboard_poll_seconds: int = 120     # interval between background sweeps
+    history_retention_days: int = 30      # prune uptime samples older than this
 
     # ------------------------------------------------------------------ #
     @classmethod

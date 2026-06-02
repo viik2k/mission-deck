@@ -22,6 +22,7 @@ import logging
 import queue
 import threading
 import traceback
+from datetime import datetime
 from pathlib import Path
 from tkinter import filedialog, messagebox
 
@@ -29,6 +30,8 @@ import customtkinter as ctk
 
 from mission_deck import __app_name__, __version__
 from mission_deck.browser import BrowserConfig, open_urls
+from mission_deck.dashboard import DashboardView
+from mission_deck.history import HistoryStore, Sample
 from mission_deck.logging_setup import audit, setup_logging
 from mission_deck.controls import DeviceControl, controls_for
 from mission_deck.editors import (
@@ -36,7 +39,13 @@ from mission_deck.editors import (
     DeviceEditorDialog,
     RoomEditorDialog,
 )
-from mission_deck.network import CheckResult, fetch_recording_status, http_get, run_status_checks
+from mission_deck.network import (
+    DEFAULT_MAX_CONCURRENCY,
+    CheckResult,
+    fetch_recording_status,
+    http_get,
+    run_status_checks,
+)
 from mission_deck.config import (
     ConfigError,
     example_config_path,
@@ -658,7 +667,7 @@ class SettingsDialog(ctk.CTkToplevel):
         self.app_state = app.app_state
         self.title("Settings")
         self.configure(fg_color=COLORS["bg"])
-        self.geometry("520x460")
+        self.geometry("520x560")
         self.transient(app)
         self.grid_columnconfigure(0, weight=1)
 
@@ -706,6 +715,24 @@ class SettingsDialog(ctk.CTkToplevel):
         self._new_window = ctk.BooleanVar(value=self.app_state.browser_new_window)
         ctk.CTkSwitch(body, text="", variable=self._new_window).grid(
             row=row, column=1, sticky="w", pady=8); row += 1
+
+        # Open on the dashboard
+        label("Open on the dashboard at launch")
+        self._start_dash = ctk.BooleanVar(value=self.app_state.start_on_dashboard)
+        ctk.CTkSwitch(body, text="", variable=self._start_dash).grid(
+            row=row, column=1, sticky="w", pady=8); row += 1
+
+        # Dashboard background refresh
+        label("Dashboard background refresh")
+        self._dash_poll = ctk.BooleanVar(value=self.app_state.dashboard_poll_enabled)
+        ctk.CTkSwitch(body, text="", variable=self._dash_poll).grid(
+            row=row, column=1, sticky="w", pady=8); row += 1
+
+        # Background refresh interval
+        label("Background refresh interval (seconds)")
+        self._dash_secs = ctk.StringVar(value=str(self.app_state.dashboard_poll_seconds or 120))
+        ctk.CTkEntry(body, textvariable=self._dash_secs, fg_color=COLORS["card"]).grid(
+            row=row, column=1, sticky="ew", pady=8); row += 1
 
         # Config file switch
         label("Configuration file")
@@ -756,11 +783,19 @@ class SettingsDialog(ctk.CTkToplevel):
         except ValueError:
             messagebox.showerror(__app_name__, "Auto-refresh interval must be a whole number.")
             return
+        try:
+            dash_secs = max(0, int(float(self._dash_secs.get())))
+        except ValueError:
+            messagebox.showerror(__app_name__, "Background refresh interval must be a whole number.")
+            return
 
         self.app_state.ping_timeout_seconds = timeout
         self.app_state.auto_refresh_seconds = refresh
         self.app_state.browser_path = self._browser.get().strip()
         self.app_state.browser_new_window = bool(self._new_window.get())
+        self.app_state.start_on_dashboard = bool(self._start_dash.get())
+        self.app_state.dashboard_poll_enabled = bool(self._dash_poll.get())
+        self.app_state.dashboard_poll_seconds = dash_secs
         self.app_state.save()
 
         audit(
@@ -769,8 +804,14 @@ class SettingsDialog(ctk.CTkToplevel):
             auto_refresh_seconds=refresh,
             browser_path=self.app_state.browser_path,
             browser_new_window=self.app_state.browser_new_window,
+            start_on_dashboard=self.app_state.start_on_dashboard,
+            dashboard_poll_enabled=self.app_state.dashboard_poll_enabled,
+            dashboard_poll_seconds=dash_secs,
         )
-        logger.info("Settings updated (timeout=%.1fs, auto_refresh=%ds)", timeout, refresh)
+        logger.info(
+            "Settings updated (timeout=%.1fs, auto_refresh=%ds, dash_poll=%s/%ds)",
+            timeout, refresh, self.app_state.dashboard_poll_enabled, dash_secs,
+        )
         self.app.apply_settings()
         self.destroy()
 
@@ -795,8 +836,14 @@ class App(ctk.CTk):
         # NB: ``app_state`` (not ``state``) — Tk reserves ``state()`` as a method.
         self.app_state = state if state is not None else AppState.load()
         self.browser_cfg = self._effective_browser_cfg()
+        # Persisted uptime history (best-effort; disabled cleanly if unwritable).
+        self.history = HistoryStore.open()
+        self.history.prune(self.app_state.history_retention_days)
         self.current_room: Room | None = None
         self._room_buttons: list[RoomButton] = []
+        # room.id -> its sidebar button, so health-dot updates are O(1) rather
+        # than a linear scan of every button on each probe result.
+        self._room_button_index: dict[str, RoomButton] = {}
         self._city_groups: list[CityGroup] = []
         self._selected_button: RoomButton | None = None
         self._device_cards: dict[str, DeviceCard] = {}
@@ -812,12 +859,27 @@ class App(ctk.CTk):
         self._check_gen = 0
         self._checking = False
         self._checking_room: Room | None = None
+        # device.id -> Device for the room being checked, so applying a result
+        # is an O(1) lookup instead of a linear scan per device (O(N²) per room).
+        self._checking_room_index: dict[str, Device] = {}
         self._result_queue: "queue.Queue[tuple]" = queue.Queue()
         self._poll_interval_ms = 40
         # Auto-refresh + config-switch state.
         self._auto_refresh_job: str | None = None
         self._statusbar_clear_job: str | None = None
         self.requested_config: Path | None = None
+        # Dashboard / estate-wide sweep state. The sweep reuses the same
+        # thread→queue→Tk-timer pattern as the room check, but on its own
+        # queue/generation so the two never tread on each other.
+        self._dashboard: DashboardView | None = None
+        self._showing_dashboard = False
+        self._sweeping = False
+        self._sweep_gen = 0
+        self._sweep_queue: "queue.Queue[tuple]" = queue.Queue()
+        self._sweep_samples: list[Sample] = []
+        self._sweep_index: dict[str, tuple[Room, Device]] = {}
+        self._dashboard_poll_job: str | None = None
+        self.last_sweep_time: datetime | None = None
 
         # --- Window chrome -------------------------------------------------- #
         ctk.set_appearance_mode(self.app_state.appearance or "dark")
@@ -834,14 +896,19 @@ class App(ctk.CTk):
         self._build_sidebar()
         self._build_main_panel()
 
-        # Select the first room so the layout is populated on launch.
+        # Select the first room so the room view is populated on launch.
         if self.site.rooms:
             self.select_room(self.site.rooms[0])
         else:
             self._show_empty_state()
 
-        # Honour a saved auto-refresh preference.
+        # Open on the dashboard unless the user turned that off.
+        if self.app_state.start_on_dashboard:
+            self.show_dashboard()
+
+        # Honour saved auto-refresh + background-sweep preferences.
         self._reschedule_auto_refresh()
+        self._reschedule_dashboard_poll()
 
     # ------------------------------------------------------------------ #
     # Sidebar
@@ -853,6 +920,7 @@ class App(ctk.CTk):
         if existing is not None:
             existing.destroy()
         self._room_buttons = []
+        self._room_button_index = {}
         self._city_groups = []
         self._selected_button = None
 
@@ -884,6 +952,22 @@ class App(ctk.CTk):
             font=ctk.CTkFont(size=12),
             text_color=COLORS["text_faint"],
         ).pack(anchor="w")
+
+        # Overview / dashboard entry — the estate-wide landing page, sitting just
+        # under the brand and above the room list.
+        self._overview_btn = ctk.CTkButton(
+            brand,
+            text="  ⌂  Overview",
+            anchor="w",
+            height=40,
+            corner_radius=CORNER,
+            fg_color="transparent",
+            hover_color=COLORS["card_hover"],
+            text_color=COLORS["text_muted"],
+            font=ctk.CTkFont(size=14, weight="bold"),
+            command=self.show_dashboard,
+        )
+        self._overview_btn.pack(anchor="w", fill="x", pady=(GAP, 0))
 
         # "ROOMS" section label + count, with an Add Room (+) button.
         rooms_header = ctk.CTkFrame(sidebar, fg_color="transparent")
@@ -941,6 +1025,7 @@ class App(ctk.CTk):
                 btn = RoomButton(room_list, room, command=self.select_room)
                 btn.grid(row=index, column=0, sticky="ew", pady=3)
                 self._room_buttons.append(btn)
+                self._room_button_index[room.id] = btn
 
         # Footer: config source + version.
         footer = ctk.CTkFrame(sidebar, fg_color="transparent")
@@ -962,11 +1047,15 @@ class App(ctk.CTk):
             text_color=COLORS["text_faint"],
         ).pack(anchor="w")
 
+        # Restore the Overview highlight if the dashboard is the active view
+        # (the sidebar is rebuilt wholesale on room add/remove/rename).
+        self._update_nav_highlight()
+
     # ------------------------------------------------------------------ #
     # Main panel
     # ------------------------------------------------------------------ #
     def _build_main_panel(self) -> None:
-        panel = ctk.CTkFrame(self, corner_radius=0, fg_color=COLORS["panel"])
+        self._room_panel = panel = ctk.CTkFrame(self, corner_radius=0, fg_color=COLORS["panel"])
         panel.grid(row=0, column=1, sticky="nsew")
         panel.grid_columnconfigure(0, weight=1)
         panel.grid_rowconfigure(1, weight=1)
@@ -1107,6 +1196,9 @@ class App(ctk.CTk):
     # Room selection + rendering
     # ------------------------------------------------------------------ #
     def select_room(self, room: Room) -> None:
+        # Choosing a room always leaves the dashboard for the room view, even
+        # when it's the room already loaded underneath the overview.
+        self.show_room_view()
         if room is self.current_room:
             return
         self.current_room = room
@@ -1136,6 +1228,8 @@ class App(ctk.CTk):
         """Called by a CityGroup once it lazily builds its room buttons."""
 
         self._room_buttons.extend(buttons)
+        for btn in buttons:
+            self._room_button_index[btn.room.id] = btn
         # If the currently-selected room's button was just built, highlight it.
         if self.current_room is not None and self._selected_button is None:
             for btn in buttons:
@@ -1298,6 +1392,178 @@ class App(ctk.CTk):
         self._update_statusbar()
 
     # ------------------------------------------------------------------ #
+    # View switching (dashboard ↔ room)
+    # ------------------------------------------------------------------ #
+    def show_dashboard(self) -> None:
+        """Reveal the estate-wide overview, building it on first use."""
+
+        if self._dashboard is None:
+            self._dashboard = DashboardView(self, self)
+        self._room_panel.grid_remove()
+        self._dashboard.grid(row=0, column=1, sticky="nsew")
+        self._dashboard.refresh()
+        self._showing_dashboard = True
+        self._update_nav_highlight()
+
+    def show_room_view(self) -> None:
+        """Reveal the per-room device panel (hiding the dashboard)."""
+
+        if self._dashboard is not None:
+            self._dashboard.grid_remove()
+        self._room_panel.grid(row=0, column=1, sticky="nsew")
+        self._showing_dashboard = False
+        self._update_nav_highlight()
+
+    def open_room_from_dashboard(self, room: Room) -> None:
+        """Jump from a dashboard tile/row straight into that room's view."""
+
+        self.show_room_view()
+        self.select_room(room)
+
+    def _update_nav_highlight(self) -> None:
+        btn = getattr(self, "_overview_btn", None)
+        if btn is not None:
+            if self._showing_dashboard:
+                btn.configure(fg_color=COLORS["accent_soft"], text_color=COLORS["text"])
+            else:
+                btn.configure(fg_color="transparent", text_color=COLORS["text_muted"])
+        # The room-selection highlight belongs to the room view only. On the
+        # dashboard no room is "active", so visually clear it (keeping
+        # ``_selected_button`` so the highlight is restored on the way back).
+        if self._selected_button is not None:
+            self._selected_button.set_selected(not self._showing_dashboard)
+
+    def _refresh_dashboard(self) -> None:
+        """Repaint the dashboard if it exists (cheap no-op when never opened)."""
+
+        if self._dashboard is not None:
+            self._dashboard.refresh()
+
+    # ------------------------------------------------------------------ #
+    # Estate-wide status sweep (feeds the dashboard + uptime history)
+    # ------------------------------------------------------------------ #
+    def run_estate_sweep(self) -> None:
+        """Probe every device in every room concurrently, off the UI thread.
+
+        Mirrors :meth:`on_check_status` but spans the whole site. Results update
+        each device's live status (so the dashboard KPIs, sidebar dots and any
+        open room repaint) and are persisted to the uptime history on completion.
+        """
+
+        if self._sweeping:
+            return
+        devices = list(self.site.all_devices())
+        if not devices:
+            self._set_statusbar("No devices to check.")
+            return
+
+        self._sweep_gen += 1
+        generation = self._sweep_gen
+        self._sweeping = True
+        self._sweep_samples = []
+        self._sweep_index = {
+            device.id: (room, device)
+            for room in self.site.rooms
+            for device in room.devices
+        }
+        for device in devices:
+            device.status = DeviceStatus.CHECKING
+        self._repaint_after_sweep_change()
+        if self._dashboard is not None:
+            self._dashboard.set_sweeping(True)
+
+        timeout = self._effective_timeout()
+        concurrency = self._effective_concurrency()
+        sweep_queue = self._sweep_queue
+        logger.info(
+            "Estate sweep started (%d device(s), timeout %.1fs, max %d concurrent)",
+            len(devices), timeout, concurrency,
+        )
+
+        def publish(result: CheckResult) -> None:
+            sweep_queue.put(("result", generation, result))
+
+        def worker() -> None:
+            try:
+                run_status_checks(devices, timeout, publish, concurrency)
+            finally:
+                sweep_queue.put(("done", generation))
+
+        threading.Thread(target=worker, daemon=True).start()
+        self.after(self._poll_interval_ms, self._drain_sweep)
+
+    def _drain_sweep(self) -> None:
+        while True:
+            try:
+                message = self._sweep_queue.get_nowait()
+            except queue.Empty:
+                break
+            if message[0] == "result":
+                _, generation, result = message
+                self._apply_sweep_result(generation, result)
+            elif message[0] == "done":
+                self._finish_sweep(message[1])
+        if self._sweeping:
+            self.after(self._poll_interval_ms, self._drain_sweep)
+
+    def _apply_sweep_result(self, generation: int, result: CheckResult) -> None:
+        if generation != self._sweep_gen:
+            return  # superseded
+        entry = self._sweep_index.get(result.device_id)
+        if entry is None:
+            return
+        room, device = entry
+        device.status = result.status
+        device.last_latency_ms = result.latency_ms
+        device.last_error = result.error
+        self._sweep_samples.append(
+            Sample(device.id, room.id, result.status, result.latency_ms)
+        )
+        # Online recorders carry a second state worth surfacing on the dashboard.
+        if isinstance(device, Recorder):
+            if result.status is DeviceStatus.ONLINE and device.recording_status_url:
+                self._poll_recording(device, room)
+            else:
+                device.recording_status = RecordingStatus.UNKNOWN
+
+    def _finish_sweep(self, generation: int) -> None:
+        if generation != self._sweep_gen:
+            return
+        self._sweeping = False
+        self.last_sweep_time = datetime.now()
+        # One pass over the estate for both tallies (it can be thousands of
+        # devices; iterating twice is pure waste).
+        online = offline = 0
+        for device in self.site.all_devices():
+            if device.status is DeviceStatus.ONLINE:
+                online += 1
+            elif device.status is DeviceStatus.OFFLINE:
+                offline += 1
+        logger.info("Estate sweep complete: %d online, %d offline", online, offline)
+        audit("status_check.estate", devices=len(self._sweep_index), online=online, offline=offline)
+        self._repaint_after_sweep_change()
+        if self._dashboard is not None:
+            self._dashboard.set_sweeping(False)
+            self._dashboard.refresh()
+        # Persist the batch off the UI thread (SQLite write is best-effort).
+        samples = self._sweep_samples
+        self._sweep_samples = []
+        if samples:
+            self.run_background(lambda: self.history.record(samples), lambda ok, msg: None)
+
+    def _repaint_after_sweep_change(self) -> None:
+        """Refresh sidebar dots and the visible room/dashboard after a bulk change."""
+
+        for btn in self._room_buttons:
+            btn.refresh_health()
+        if self.current_room is not None:
+            for card in self._device_cards.values():
+                card.refresh()
+            self._update_statusbar()
+        if self._showing_dashboard:
+            self._refresh_dashboard()
+
+    # ------------------------------------------------------------------ #
     # Status indicator API (Step 4 ping worker calls these)
     # ------------------------------------------------------------------ #
     def set_device_status(self, device: Device, status: DeviceStatus) -> None:
@@ -1312,10 +1578,9 @@ class App(ctk.CTk):
     def _refresh_room_health(self, room: Room) -> None:
         """Update the sidebar dot for *room* to reflect its current health."""
 
-        for btn in self._room_buttons:
-            if btn.room is room:
-                btn.refresh_health()
-                return
+        btn = self._room_button_index.get(room.id)
+        if btn is not None:
+            btn.refresh_health()
 
     def set_room_status(self, status: DeviceStatus) -> None:
         """Bulk-set every device in the current room to a status."""
@@ -1422,10 +1687,12 @@ class App(ctk.CTk):
         generation = self._check_gen
         self._checking = True
         self._checking_room = room
+        self._checking_room_index = {d.id: d for d in devices}
         self._check_btn.configure(state="disabled", text="Checking…")
         self.set_room_status(DeviceStatus.CHECKING)
 
         timeout = self._effective_timeout()
+        concurrency = self._effective_concurrency()
         result_queue = self._result_queue
         logger.info(
             "Status check started for room '%s' (%d device(s), timeout %.1fs)",
@@ -1438,7 +1705,7 @@ class App(ctk.CTk):
 
         def worker() -> None:
             try:
-                run_status_checks(devices, timeout, publish)
+                run_status_checks(devices, timeout, publish, concurrency)
             finally:
                 result_queue.put(("done", generation))
 
@@ -1447,8 +1714,16 @@ class App(ctk.CTk):
         self.after(self._poll_interval_ms, self._drain_results)
 
     def _drain_results(self) -> None:
-        """Apply queued probe results on the Tk thread; reschedule until done."""
+        """Apply queued probe results on the Tk thread; reschedule until done.
 
+        Results are applied to the model as a batch and the room is repainted
+        **once** per tick — not once per device — so a check of a dense room
+        stays smooth instead of paying a full statusbar recount and sidebar
+        refresh for every individual result.
+        """
+
+        changed: list[Device] = []
+        done_generation: int | None = None
         while True:
             try:
                 message = self._result_queue.get_nowait()
@@ -1456,22 +1731,40 @@ class App(ctk.CTk):
                 break
             if message[0] == "result":
                 _, generation, result = message
-                self._apply_result(generation, result)
+                device = self._apply_result(generation, result)
+                if device is not None:
+                    changed.append(device)
             elif message[0] == "done":
-                self._finish_check(message[1])
+                done_generation = message[1]
+
+        if changed and self.current_room is self._checking_room:
+            for device in changed:
+                card = self._device_cards.get(device.id)
+                if card is not None and card.device is device:
+                    card.refresh()
+            self._update_statusbar()
+            if self._checking_room is not None:
+                self._refresh_room_health(self._checking_room)
+
+        if done_generation is not None:
+            self._finish_check(done_generation)
 
         if self._checking:
             self.after(self._poll_interval_ms, self._drain_results)
 
-    def _apply_result(self, generation: int, result: CheckResult) -> None:
-        """Apply one probe result on the UI thread."""
+    def _apply_result(self, generation: int, result: CheckResult) -> Device | None:
+        """Apply one probe result to the model; return the device if it changed.
+
+        Repainting is handled in bulk by :meth:`_drain_results`; this only
+        touches the data model so it stays cheap to call per result.
+        """
 
         if generation != self._check_gen or self._checking_room is None:
-            return  # superseded by a newer run
+            return None  # superseded by a newer run
         room = self._checking_room
-        device = room.get_device(result.device_id)
+        device = self._checking_room_index.get(result.device_id)
         if device is None:
-            return
+            return None
         device.status = result.status
         device.last_latency_ms = result.latency_ms
         device.last_error = result.error
@@ -1482,13 +1775,7 @@ class App(ctk.CTk):
                 self._poll_recording(device, room)
             else:
                 device.recording_status = RecordingStatus.UNKNOWN
-        # Repaint only if this device's card is the one currently on screen.
-        if self.current_room is room:
-            card = self._device_cards.get(device.id)
-            if card is not None and card.device is device:
-                card.refresh()
-            self._update_statusbar()
-            self._refresh_room_health(room)
+        return device
 
     def _poll_recording(self, device: Recorder, room: Room) -> None:
         """Fetch a recorder's recording state off-thread and repaint its card.
@@ -1519,6 +1806,7 @@ class App(ctk.CTk):
         if generation != self._check_gen:
             return
         self._checking = False
+        self._checking_room_index = {}
         self._check_btn.configure(state="normal", text="Check Status")
         self._update_statusbar()
         room = self._checking_room
@@ -1538,6 +1826,17 @@ class App(ctk.CTk):
                 online=online,
                 offline=offline,
             )
+            # Feed the uptime history so manual room checks build trend data too.
+            samples = [
+                Sample(d.id, room.id, d.status, d.last_latency_ms)
+                for d in room.devices
+                if d.status.is_resolved
+            ]
+            if samples:
+                self.run_background(lambda: self.history.record(samples), lambda ok, msg: None)
+            # If the dashboard is open behind a check, keep it current.
+            if self._showing_dashboard:
+                self._refresh_dashboard()
 
     # ------------------------------------------------------------------ #
     # Effective settings (state overrides config)
@@ -1546,6 +1845,19 @@ class App(ctk.CTk):
         if self.app_state.ping_timeout_seconds:
             return float(self.app_state.ping_timeout_seconds)
         return self.site.ping_timeout_seconds
+
+    def _effective_concurrency(self) -> int:
+        """Max simultaneous probes: user preference > config > built-in default.
+
+        Caps how many connections a status check / estate sweep opens at once
+        so a large estate never floods the network or exhausts sockets.
+        """
+
+        if self.app_state.max_concurrent_checks > 0:
+            return int(self.app_state.max_concurrent_checks)
+        if self.site.max_concurrent_checks > 0:
+            return self.site.max_concurrent_checks
+        return DEFAULT_MAX_CONCURRENCY
 
     def _effective_browser_cfg(self) -> BrowserConfig:
         cfg = BrowserConfig.from_settings(self.site.settings)
@@ -1559,6 +1871,7 @@ class App(ctk.CTk):
 
         self.browser_cfg = self._effective_browser_cfg()
         self._reschedule_auto_refresh()
+        self._reschedule_dashboard_poll()
 
     # ------------------------------------------------------------------ #
     # Generic background runner (for one-shot device control commands)
@@ -1735,6 +2048,34 @@ class App(ctk.CTk):
             self.on_check_status()
         self._reschedule_auto_refresh()
 
+    # ------------------------------------------------------------------ #
+    # Dashboard background poll (estate-wide sweep on a timer)
+    # ------------------------------------------------------------------ #
+    def on_toggle_dashboard_poll(self, enabled: bool) -> None:
+        self.app_state.dashboard_poll_enabled = bool(enabled)
+        self.app_state.save()
+        self._reschedule_dashboard_poll()
+        if enabled:
+            secs = self.app_state.dashboard_poll_seconds or 120
+            self._set_statusbar(f"Background refresh every {secs}s is on.")
+            # Kick off an immediate sweep so the dashboard isn't blank until the
+            # first interval elapses.
+            self.run_estate_sweep()
+
+    def _reschedule_dashboard_poll(self) -> None:
+        if self._dashboard_poll_job is not None:
+            self.after_cancel(self._dashboard_poll_job)
+            self._dashboard_poll_job = None
+        if self.app_state.dashboard_poll_enabled and (self.app_state.dashboard_poll_seconds or 0) > 0:
+            interval_ms = int(self.app_state.dashboard_poll_seconds * 1000)
+            self._dashboard_poll_job = self.after(interval_ms, self._dashboard_poll_tick)
+
+    def _dashboard_poll_tick(self) -> None:
+        self._dashboard_poll_job = None
+        if not self._sweeping:
+            self.run_estate_sweep()
+        self._reschedule_dashboard_poll()
+
 
 # --------------------------------------------------------------------------- #
 # Welcome screen (friendly first-run / no-config experience)
@@ -1892,6 +2233,7 @@ def _run(state: AppState) -> None:
         app = App(site, config_path=path, state=state)
         app.mainloop()
         state.save()
+        app.history.close()
 
         if app.requested_config is not None:
             pending = app.requested_config

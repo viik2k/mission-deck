@@ -34,13 +34,15 @@ Each module has one job and strict constraints:
 |--------|-----|----------------|
 | `config.py` | Locate/load/validate JSON config | No GUI, no device internals |
 | `models.py` | Typed data models + device registry | No I/O, no GUI, no networking |
-| `network.py` | Async TCP probes + HTTP/TCP control transports | No GUI; thread-safe; results via callback |
+| `network.py` | Async device probes (monitor registry) + HTTP/TCP control transports | No GUI; thread-safe; results via callback |
 | `controls.py` | Build per-device control action lists | Config-driven; delegates I/O to `network.py` |
 | `browser.py` | Open URLs in configured browser | Launches subprocess/webbrowser; no models |
+| `history.py` | Persisted uptime-history store (SQLite) | Stdlib `sqlite3` only; best-effort; never raises into callers |
+| `dashboard.py` | Estate-wide overview view (KPIs, attention/uptime/recorder/activity panels) | Presentation only; reads `Site`/`HistoryStore`; no networking; UI thread |
 | `state.py` | Persisted user preferences + recent files | Best-effort JSON; never breaks app if corrupt |
 | `theme.py` | Colour and sizing constants | Pure constants, no logic |
 | `logging_setup.py` | Centralised diagnostic + audit logging | Stdlib only; idempotent; never raises into callers |
-| `app.py` | CustomTkinter UI + event orchestration | ~1300 LOC; marshals network results to UI thread |
+| `app.py` | CustomTkinter UI + event orchestration | Marshals network results to UI thread |
 
 ### Data model hierarchy
 
@@ -56,12 +58,54 @@ Site
 
 `Device.from_dict()` dispatches to subclasses registered with `@register_device("type_key")`. Unknown JSON keys are preserved in `Device.extra` for forward compatibility.
 
+### Monitoring plugins (monitor registry)
+
+How a device's reachability is judged is itself pluggable. `network.py` holds a
+`_MONITOR_REGISTRY` and a `@register_monitor("name")` decorator that mirrors
+`@register_device`. A *monitor* is `async (Device, float) -> CheckResult`.
+Built-ins: `tcp` (open a TCP connection — the historical default for every
+config) and `http`/`https` (any *answered* endpoint counts as up; URL comes from
+a `health_url` config key, else the device's `web_url`). `check_device()` is just
+a dispatcher: a device opts into a monitor with a `"monitor"` config key,
+otherwise it falls back to `DEFAULT_MONITOR` (`tcp`). Add a new check type with a
+single decorator — no caller changes.
+
+### Dashboard + estate-wide sweep
+
+The **Overview** (`dashboard.py`) is a second top-level view, swapped with the
+room panel in the same grid cell (`App.show_dashboard()` / `show_room_view()`;
+sidebar "⌂ Overview" button). It renders a KPI bar, an attention list, a
+recorders panel, an uptime panel, and a recent-activity feed
+(`logging_setup.tail_audit`). It is pure presentation: it reads live `Site` state
++ the `HistoryStore` and calls back into `App`; it never touches the network
+itself. The destroy-and-rebuild list panels are guarded by content signatures
+and capped at `MAX_LIST_ROWS`, so a refresh whose data hasn't changed (or an
+estate with hundreds of offline devices) doesn't rebuild thousands of widgets.
+
+`App.run_estate_sweep()` probes **all** rooms (`site.all_devices()`) using the
+same worker/queue/`after()` pattern as a room check but on its own queue +
+generation counter. Each completed sweep (and each single-room check) appends a
+batch of `history.Sample`s, persisted off the UI thread via `run_background`. A
+background timer (`dashboard_poll_enabled`/`dashboard_poll_seconds` in `AppState`)
+can re-run the sweep on an interval.
+
+### Uptime history
+
+`history.HistoryStore` is a best-effort SQLite store at
+`<user_config_dir>/history.db` (override with `MISSION_DECK_HISTORY_DB`). One
+shared connection (`check_same_thread=False` + a lock, WAL mode) serves Tk-thread
+reads and worker-thread writes. Only resolved (ONLINE/OFFLINE) samples are
+stored; `uptime`/`room_uptime` return `None` when the window has no data (so the
+UI shows "—", not a false 0%). Samples older than `history_retention_days` are
+pruned on open. Like `state.py`/auditing, it never raises into callers.
+
 ### Threading model
 
 - **UI thread:** Tk runs exclusively here. Never touch widgets from a worker thread.
-- **Status-check worker:** `run_status_checks()` runs on a daemon thread, probes devices concurrently via `asyncio`, publishes `CheckResult` objects to a thread-safe queue.
+- **Status-check worker:** `run_status_checks()` runs on a daemon thread, probes devices concurrently via `asyncio` (each device through its registered monitor), publishes `CheckResult` objects to a thread-safe queue. Used for both the per-room check and the estate-wide sweep (separate queues/generations). Concurrency is **bounded** by an `asyncio.Semaphore` (default `network.DEFAULT_MAX_CONCURRENCY = 128`, tunable via the `max_concurrent_checks` app/config setting → `App._effective_concurrency()`) so an estate-wide sweep of thousands of devices never opens thousands of sockets at once. The Tk-side queue drain (`_drain_results`) applies results to the model in a batch and repaints **once per tick**, not per device.
 - **Control worker:** Device commands (HTTP/TCP) run on a daemon thread via `app.run_background()`.
-- **Result marshalling:** `app.after()` polls the queue on the Tk timer; results update device cards live without blocking.
+- **History writes:** batched per sweep/check and written off the UI thread via `run_background` (SQLite, best-effort).
+- **Result marshalling:** `app.after()` polls the queue on the Tk timer; results update device cards / sidebar dots live without blocking.
 
 ### Config discovery order (first match wins)
 
@@ -75,6 +119,8 @@ If no config is found, a `WelcomeWindow` is shown. Switching config in Settings 
 ### Config-driven device commands
 
 Device `commands` entries in JSON (HTTP or raw TCP) require no code changes. Placeholders `{host}`, `{port}`, `{value}` are substituted at runtime (in both the URL and the body). An optional `prompt` key causes the UI to ask the user for `{value}` before sending. HTTP commands may set `method` (e.g. `POST`), a `body`, `headers`, `auth` (`{"username","password"}` → Basic auth) and `verify_tls: false` — enough to drive VC codec APIs (Cisco xCommand, Poly REST) over self-signed-cert HTTPS. Codec credentials live in the git-ignored `config.json`, never in `config.example.json`.
+
+A device may also pick how it is health-checked with a `"monitor"` key (`tcp` default, or `http`/`https`); the `http` monitor probes an optional `health_url` (else the device's web UI). See the monitor registry above.
 
 ### Widget pooling
 
@@ -98,8 +144,9 @@ rotating streams to `<user_config_dir>/logs/` (override the directory with
   `logging.getLogger(__name__)`. Level defaults to `INFO`; set
   `MISSION_DECK_LOG_LEVEL=DEBUG` to trace probes/transports.
 - **`audit.log`** — one JSON object per line recording operator actions
-  (`device.command`, `room.open_web_uis`, `status_check.complete`, `config.load`,
-  `config.save`, `config.switch`, `settings.change`, `app.start`/`app.stop`). Emit
+  (`device.command`, `room.open_web_uis`, `status_check.complete`,
+  `status_check.estate`, `config.load`, `config.save`, `config.switch`,
+  `settings.change`, `app.start`/`app.stop`). Emit
   events with `logging_setup.audit(event, **fields)`; each line carries `ts`, `event`
   and `user`. The audit logger never propagates to the diagnostic handlers.
 

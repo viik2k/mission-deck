@@ -2,6 +2,7 @@
   "schema_version": 1,
   "app": {
     "ping_timeout_seconds": 2.0,
+    "max_concurrent_checks": 128,
     "default_appearance": "dark",
     "browser": {
       "path": "",
@@ -11,18 +12,18 @@
   },
   "rooms": [
     {
-      "id": "courtroom-1a",
+      "id": "mel-1a",
       "name": "Courtroom 1A",
       "city": "Melbourne",
-      "location": "1st Floor - East Wing",
-      "notes": "Main felony trial courtroom.",
+      "location": "Level 1 — East Wing",
+      "notes": "Flagship criminal trial courtroom. Full AV-over-IP distribution via Blustream, Cisco Webex remote-appearance codec, and JAVS digital court recording.",
       "devices": [
         {
-          "id": "1a-crestron-cp4",
+          "id": "mel-1a-ctrl",
           "name": "Crestron Control Processor",
           "type": "control_processor",
           "manufacturer": "Crestron",
-          "model": "CP4",
+          "model": "CP4N",
           "host": "10.10.1.10",
           "port": 41794,
           "protocol": "tcp",
@@ -31,191 +32,300 @@
           "tags": ["control", "automation"]
         },
         {
-          "id": "1a-ptz-judge",
+          "id": "mel-1a-webex",
+          "name": "Cisco Webex Room Kit Pro",
+          "type": "cisco_webex",
+          "manufacturer": "Cisco",
+          "model": "Room Kit Pro",
+          "host": "10.10.1.5",
+          "port": 443,
+          "protocol": "https",
+          "web_protocol": "https",
+          "web_port": 443,
+          "tags": ["video-conference", "vc"],
+          "commands": [
+            {
+              "id": "dial",
+              "label": "Place Call…",
+              "protocol": "https",
+              "method": "POST",
+              "url": "https://{host}/putxml",
+              "body": "<Command><Dial><Number>{value}</Number></Dial></Command>",
+              "prompt": "Address or number to dial",
+              "auth": {"username": "admin", "password": "changeme"},
+              "verify_tls": false
+            },
+            {
+              "id": "hangup",
+              "label": "Hang Up",
+              "protocol": "https",
+              "method": "POST",
+              "url": "https://{host}/putxml",
+              "body": "<Command><Call><Disconnect/></Call></Command>",
+              "auth": {"username": "admin", "password": "changeme"},
+              "verify_tls": false
+            },
+            {
+              "id": "standby-on",
+              "label": "Standby On",
+              "protocol": "https",
+              "method": "POST",
+              "url": "https://{host}/putxml",
+              "body": "<Command><Standby><Activate/></Standby></Command>",
+              "auth": {"username": "admin", "password": "changeme"},
+              "verify_tls": false
+            },
+            {
+              "id": "standby-off",
+              "label": "Standby Off",
+              "protocol": "https",
+              "method": "POST",
+              "url": "https://{host}/putxml",
+              "body": "<Command><Standby><Deactivate/></Standby></Command>",
+              "auth": {"username": "admin", "password": "changeme"},
+              "verify_tls": false
+            },
+            {
+              "id": "volume-up",
+              "label": "Volume Up",
+              "protocol": "https",
+              "method": "POST",
+              "url": "https://{host}/putxml",
+              "body": "<Command><Audio><Volume><Increase/></Volume></Audio></Command>",
+              "auth": {"username": "admin", "password": "changeme"},
+              "verify_tls": false
+            },
+            {
+              "id": "volume-down",
+              "label": "Volume Down",
+              "protocol": "https",
+              "method": "POST",
+              "url": "https://{host}/putxml",
+              "body": "<Command><Audio><Volume><Decrease/></Volume></Audio></Command>",
+              "auth": {"username": "admin", "password": "changeme"},
+              "verify_tls": false
+            },
+            {
+              "id": "mute-mic",
+              "label": "Mute Microphone",
+              "protocol": "https",
+              "method": "POST",
+              "url": "https://{host}/putxml",
+              "body": "<Command><Audio><Microphones><Mute/></Microphones></Audio></Command>",
+              "auth": {"username": "admin", "password": "changeme"},
+              "verify_tls": false
+            },
+            {
+              "id": "unmute-mic",
+              "label": "Unmute Microphone",
+              "protocol": "https",
+              "method": "POST",
+              "url": "https://{host}/putxml",
+              "body": "<Command><Audio><Microphones><Unmute/></Microphones></Audio></Command>",
+              "auth": {"username": "admin", "password": "changeme"},
+              "verify_tls": false
+            }
+          ]
+        },
+        {
+          "id": "mel-1a-dsp",
+          "name": "Biamp TesiraFORTE AVB",
+          "type": "audio_dsp",
+          "manufacturer": "Biamp",
+          "model": "TesiraFORTE AVB CI",
+          "host": "10.10.1.20",
+          "port": 23,
+          "protocol": "tcp",
+          "web_protocol": "http",
+          "web_port": 80,
+          "tags": ["audio", "dsp"],
+          "commands": [
+            {
+              "id": "mute-on",
+              "label": "Mute All Outputs",
+              "protocol": "tcp",
+              "payload": "LevelControl 1 set mute true\n"
+            },
+            {
+              "id": "mute-off",
+              "label": "Unmute All Outputs",
+              "protocol": "tcp",
+              "payload": "LevelControl 1 set mute false\n"
+            },
+            {
+              "id": "set-level",
+              "label": "Set Master Level…",
+              "protocol": "tcp",
+              "payload": "LevelControl 1 set level 0 {value}\n",
+              "prompt": "Level in dB (e.g. -6.0)",
+              "read_response": true
+            },
+            {
+              "id": "get-status",
+              "label": "Device Status",
+              "protocol": "tcp",
+              "payload": "DEVICE get networkStatus\n",
+              "read_response": true
+            }
+          ]
+        },
+        {
+          "id": "mel-1a-ptz-judge",
           "name": "Judge Bench PTZ Camera",
           "type": "ptz_camera",
           "manufacturer": "Sony",
-          "model": "SRG-300H",
+          "model": "SRG-X400",
           "host": "10.10.1.21",
           "port": 80,
           "protocol": "http",
-          "tags": ["camera", "video"]
+          "tags": ["camera", "video"],
+          "commands": [
+            {
+              "id": "preset-home",
+              "label": "Home Position",
+              "protocol": "http",
+              "url": "http://{host}/command/presetposition.cgi?PresetCall=0&PresetSpeed=24"
+            },
+            {
+              "id": "preset-closeup",
+              "label": "Close-up Preset",
+              "protocol": "http",
+              "url": "http://{host}/command/presetposition.cgi?PresetCall=1&PresetSpeed=24"
+            },
+            {
+              "id": "preset-wide",
+              "label": "Wide Shot Preset",
+              "protocol": "http",
+              "url": "http://{host}/command/presetposition.cgi?PresetCall=2&PresetSpeed=24"
+            },
+            {
+              "id": "preset-recall",
+              "label": "Recall Preset…",
+              "protocol": "http",
+              "url": "http://{host}/command/presetposition.cgi?PresetCall={value}&PresetSpeed=24",
+              "prompt": "Preset number (0–15)"
+            },
+            {
+              "id": "zoom-tele",
+              "label": "Zoom In",
+              "protocol": "http",
+              "url": "http://{host}/command/ptzf.cgi?zoom=tele_standard"
+            },
+            {
+              "id": "zoom-wide",
+              "label": "Zoom Out",
+              "protocol": "http",
+              "url": "http://{host}/command/ptzf.cgi?zoom=wide_standard"
+            }
+          ]
         },
         {
-          "id": "1a-ptz-witness",
+          "id": "mel-1a-ptz-witness",
           "name": "Witness Stand PTZ Camera",
           "type": "ptz_camera",
           "manufacturer": "Sony",
-          "model": "SRG-300H",
+          "model": "SRG-X400",
           "host": "10.10.1.22",
           "port": 80,
           "protocol": "http",
-          "tags": ["camera", "video"]
+          "tags": ["camera", "video"],
+          "commands": [
+            {
+              "id": "preset-home",
+              "label": "Home Position",
+              "protocol": "http",
+              "url": "http://{host}/command/presetposition.cgi?PresetCall=0&PresetSpeed=24"
+            },
+            {
+              "id": "preset-closeup",
+              "label": "Close-up Preset",
+              "protocol": "http",
+              "url": "http://{host}/command/presetposition.cgi?PresetCall=1&PresetSpeed=24"
+            },
+            {
+              "id": "preset-wide",
+              "label": "Wide Shot Preset",
+              "protocol": "http",
+              "url": "http://{host}/command/presetposition.cgi?PresetCall=2&PresetSpeed=24"
+            },
+            {
+              "id": "preset-recall",
+              "label": "Recall Preset…",
+              "protocol": "http",
+              "url": "http://{host}/command/presetposition.cgi?PresetCall={value}&PresetSpeed=24",
+              "prompt": "Preset number (0–15)"
+            }
+          ]
         },
         {
-          "id": "1a-dsp",
-          "name": "Audio DSP",
-          "type": "audio_dsp",
-          "manufacturer": "Biamp",
-          "model": "TesiraFORTE",
-          "host": "10.10.1.30",
-          "port": 22,
-          "protocol": "ssh",
-          "tags": ["audio"]
-        },
-        {
-          "id": "1a-display-gallery",
-          "name": "Gallery Evidence Display",
-          "type": "display",
-          "manufacturer": "Samsung",
-          "model": "QM55R",
-          "host": "10.10.1.41",
-          "port": 1515,
-          "protocol": "tcp",
-          "tags": ["display", "video"]
-        },
-        {
-          "id": "1a-recorder",
-          "name": "Digital Court Recorder",
-          "type": "recorder",
-          "manufacturer": "JAVS",
-          "model": "Notewise",
-          "host": "10.10.1.50",
-          "port": 443,
-          "protocol": "https",
-          "web_path": "/admin",
-          "recording_status_url": "https://10.10.1.50/api/recording/status",
-          "recording_status_json_path": "state.recording",
-          "recording_start_url": "https://10.10.1.50/api/recording/start",
-          "recording_stop_url": "https://10.10.1.50/api/recording/stop",
-          "tags": ["recording", "record"]
-        }
-      ]
-    },
-    {
-      "id": "courtroom-2b",
-      "name": "Courtroom 2B",
-      "city": "Melbourne",
-      "location": "2nd Floor - West Wing",
-      "notes": "Civil and arraignment courtroom.",
-      "devices": [
-        {
-          "id": "2b-crestron-cp4",
-          "name": "Crestron Control Processor",
-          "type": "control_processor",
-          "manufacturer": "Crestron",
-          "model": "CP4N",
-          "host": "10.10.2.10",
-          "port": 41794,
-          "protocol": "tcp",
-          "web_protocol": "http",
-          "web_port": 80,
-          "tags": ["control", "automation"]
-        },
-        {
-          "id": "2b-ptz-room",
-          "name": "Room Overview PTZ Camera",
+          "id": "mel-1a-ptz-counsel",
+          "name": "Counsel Tables PTZ Camera",
           "type": "ptz_camera",
-          "manufacturer": "Vaddio",
-          "model": "RoboSHOT 12E",
-          "host": "10.10.2.21",
+          "manufacturer": "Sony",
+          "model": "SRG-X120",
+          "host": "10.10.1.23",
           "port": 80,
           "protocol": "http",
-          "tags": ["camera", "video"]
+          "tags": ["camera", "video"],
+          "commands": [
+            {
+              "id": "preset-home",
+              "label": "Home Position",
+              "protocol": "http",
+              "url": "http://{host}/command/presetposition.cgi?PresetCall=0&PresetSpeed=24"
+            },
+            {
+              "id": "preset-prosecution",
+              "label": "Prosecution Side",
+              "protocol": "http",
+              "url": "http://{host}/command/presetposition.cgi?PresetCall=1&PresetSpeed=24"
+            },
+            {
+              "id": "preset-defense",
+              "label": "Defense Side",
+              "protocol": "http",
+              "url": "http://{host}/command/presetposition.cgi?PresetCall=2&PresetSpeed=24"
+            }
+          ]
         },
         {
-          "id": "2b-dsp",
-          "name": "Audio DSP",
-          "type": "audio_dsp",
-          "manufacturer": "QSC",
-          "model": "Core 110f",
-          "host": "10.10.2.30",
-          "port": 1710,
-          "protocol": "tcp",
-          "tags": ["audio"]
-        },
-        {
-          "id": "2b-doc-camera",
-          "name": "Evidence Document Camera",
-          "type": "document_camera",
-          "manufacturer": "ELMO",
-          "model": "PX-30E",
-          "host": "10.10.2.45",
-          "port": 80,
-          "protocol": "http",
-          "tags": ["camera", "evidence"]
-        },
-        {
-          "id": "2b-display-judge",
-          "name": "Judge Bench Monitor",
-          "type": "display",
-          "manufacturer": "NEC",
-          "model": "E243F",
-          "host": "10.10.2.42",
-          "port": 7142,
-          "protocol": "tcp",
-          "tags": ["display", "video"]
-        }
-      ]
-    },
-    {
-      "id": "courtroom-7",
-      "name": "Courtroom 7",
-      "city": "Sydney",
-      "location": "Ground Floor",
-      "notes": "Downing Centre - directions hearings.",
-      "devices": [
-        {
-          "id": "syd7-crestron",
-          "name": "Crestron Control Processor",
-          "type": "control_processor",
-          "manufacturer": "Crestron",
-          "model": "CP4N",
-          "host": "10.20.7.10",
-          "port": 41794,
-          "protocol": "tcp",
-          "web_protocol": "http",
-          "web_port": 80,
-          "tags": ["control", "automation"]
-        },
-        {
-          "id": "syd7-ptz",
+          "id": "mel-1a-ptz-overview",
           "name": "Room Overview PTZ Camera",
           "type": "ptz_camera",
           "manufacturer": "Sony",
-          "model": "SRG-300H",
-          "host": "10.20.7.21",
+          "model": "SRG-X120",
+          "host": "10.10.1.24",
           "port": 80,
           "protocol": "http",
-          "tags": ["camera", "video"]
+          "tags": ["camera", "video"],
+          "commands": [
+            {
+              "id": "preset-home",
+              "label": "Home Position",
+              "protocol": "http",
+              "url": "http://{host}/command/presetposition.cgi?PresetCall=0&PresetSpeed=24"
+            },
+            {
+              "id": "preset-gallery",
+              "label": "Gallery View",
+              "protocol": "http",
+              "url": "http://{host}/command/presetposition.cgi?PresetCall=1&PresetSpeed=24"
+            },
+            {
+              "id": "preset-bench",
+              "label": "Judge's Bench View",
+              "protocol": "http",
+              "url": "http://{host}/command/presetposition.cgi?PresetCall=2&PresetSpeed=24"
+            }
+          ]
         },
         {
-          "id": "syd7-dsp",
-          "name": "Audio DSP",
-          "type": "audio_dsp",
-          "manufacturer": "QSC",
-          "model": "Core 110f",
-          "host": "10.20.7.30",
-          "port": 1710,
-          "protocol": "tcp",
-          "tags": ["audio"]
-        }
-      ]
-    },
-    {
-      "id": "courtroom-3c",
-      "name": "Courtroom 3C",
-      "city": "Brisbane",
-      "location": "3rd Floor - Video Distribution",
-      "notes": "Blustream AV-over-IP distribution with Cisco Webex conferencing.",
-      "devices": [
-        {
-          "id": "3c-blustream-matrix",
+          "id": "mel-1a-matrix",
           "name": "Blustream Video Matrix",
           "type": "video_matrix",
           "manufacturer": "Blustream",
-          "model": "Multicast Controller",
-          "host": "10.30.3.10",
+          "model": "MC80",
+          "host": "10.10.1.30",
           "port": 23,
           "protocol": "telnet",
           "web_protocol": "http",
@@ -223,22 +333,52 @@
           "tags": ["video", "matrix", "distribution"],
           "commands": [
             {
-              "id": "route-gallery-bench",
-              "label": "Gallery Display ← Bench PC",
+              "id": "route-all-bench",
+              "label": "All Displays ← Bench PC",
+              "protocol": "tcp",
+              "payload": "MATRIX SET ALL IN 1\r\n"
+            },
+            {
+              "id": "route-judge-bench",
+              "label": "Judge ← Bench PC",
               "protocol": "tcp",
               "payload": "MATRIX SET OUT 1 IN 1\r\n"
             },
             {
-              "id": "route-prompt",
+              "id": "route-judge-prosecution",
+              "label": "Judge ← Prosecution PC",
+              "protocol": "tcp",
+              "payload": "MATRIX SET OUT 1 IN 2\r\n"
+            },
+            {
+              "id": "route-gallery-bench",
+              "label": "Gallery ← Bench PC",
+              "protocol": "tcp",
+              "payload": "MATRIX SET OUT 2 IN 1\r\n"
+            },
+            {
+              "id": "route-gallery-prosecution",
+              "label": "Gallery ← Prosecution PC",
+              "protocol": "tcp",
+              "payload": "MATRIX SET OUT 2 IN 2\r\n"
+            },
+            {
+              "id": "route-jury-defense",
+              "label": "Jury ← Defense PC",
+              "protocol": "tcp",
+              "payload": "MATRIX SET OUT 3 IN 3\r\n"
+            },
+            {
+              "id": "route-custom",
               "label": "Route Output…",
               "protocol": "tcp",
               "payload": "{value}\r\n",
-              "prompt": "Routing command (e.g. MATRIX SET OUT 2 IN 3)",
+              "prompt": "Routing command (e.g. MATRIX SET OUT 3 IN 2)",
               "read_response": true
             },
             {
               "id": "query-routing",
-              "label": "Query Routing",
+              "label": "Query Current Routing",
               "protocol": "tcp",
               "payload": "STATUS\r\n",
               "read_response": true
@@ -246,12 +386,63 @@
           ]
         },
         {
-          "id": "3c-blustream-tx-bench",
-          "name": "Bench PC Encoder (TX)",
+          "id": "mel-1a-tx-bench",
+          "name": "Bench PC Encoder (TX-1)",
           "type": "video_encoder",
           "manufacturer": "Blustream",
           "model": "IP200UHD-TX",
-          "host": "192.168.3.21",
+          "host": "192.168.10.21",
+          "port": 80,
+          "protocol": "http",
+          "monitor": "http",
+          "tags": ["video", "av-over-ip", "tx"],
+          "commands": [
+            {
+              "id": "reboot",
+              "label": "Reboot Encoder",
+              "protocol": "http",
+              "url": "http://{host}/reboot"
+            },
+            {
+              "id": "status",
+              "label": "Get Status",
+              "protocol": "http",
+              "url": "http://{host}/status"
+            }
+          ]
+        },
+        {
+          "id": "mel-1a-tx-prosecution",
+          "name": "Prosecution PC Encoder (TX-2)",
+          "type": "video_encoder",
+          "manufacturer": "Blustream",
+          "model": "IP200UHD-TX",
+          "host": "192.168.10.22",
+          "port": 80,
+          "protocol": "http",
+          "tags": ["video", "av-over-ip", "tx"],
+          "commands": [
+            {
+              "id": "reboot",
+              "label": "Reboot Encoder",
+              "protocol": "http",
+              "url": "http://{host}/reboot"
+            },
+            {
+              "id": "status",
+              "label": "Get Status",
+              "protocol": "http",
+              "url": "http://{host}/status"
+            }
+          ]
+        },
+        {
+          "id": "mel-1a-tx-defense",
+          "name": "Defense PC Encoder (TX-3)",
+          "type": "video_encoder",
+          "manufacturer": "Blustream",
+          "model": "IP200UHD-TX",
+          "host": "192.168.10.23",
           "port": 80,
           "protocol": "http",
           "tags": ["video", "av-over-ip", "tx"],
@@ -265,12 +456,37 @@
           ]
         },
         {
-          "id": "3c-blustream-rx-gallery",
-          "name": "Gallery Display Decoder (RX)",
+          "id": "mel-1a-rx-judge",
+          "name": "Judge Bench Decoder (RX-1)",
           "type": "video_decoder",
           "manufacturer": "Blustream",
           "model": "IP200UHD-RX",
-          "host": "192.168.3.31",
+          "host": "192.168.10.31",
+          "port": 80,
+          "protocol": "http",
+          "tags": ["video", "av-over-ip", "rx"],
+          "commands": [
+            {
+              "id": "reboot",
+              "label": "Reboot Decoder",
+              "protocol": "http",
+              "url": "http://{host}/reboot"
+            },
+            {
+              "id": "status",
+              "label": "Get Status",
+              "protocol": "http",
+              "url": "http://{host}/status"
+            }
+          ]
+        },
+        {
+          "id": "mel-1a-rx-gallery",
+          "name": "Gallery Display Decoder (RX-2)",
+          "type": "video_decoder",
+          "manufacturer": "Blustream",
+          "model": "IP200UHD-RX",
+          "host": "192.168.10.32",
           "port": 80,
           "protocol": "http",
           "tags": ["video", "av-over-ip", "rx"],
@@ -284,12 +500,12 @@
           ]
         },
         {
-          "id": "3c-blustream-rx-judge",
-          "name": "Judge Bench Decoder (RX)",
+          "id": "mel-1a-rx-jury",
+          "name": "Jury Box Decoder (RX-3)",
           "type": "video_decoder",
           "manufacturer": "Blustream",
           "model": "IP200UHD-RX",
-          "host": "192.168.3.32",
+          "host": "192.168.10.33",
           "port": 80,
           "protocol": "http",
           "tags": ["video", "av-over-ip", "rx"],
@@ -303,12 +519,431 @@
           ]
         },
         {
-          "id": "3c-cisco-webex",
-          "name": "Cisco Webex Room Codec",
+          "id": "mel-1a-disp-judge",
+          "name": "Judge Bench Monitor",
+          "type": "display",
+          "manufacturer": "Samsung",
+          "model": "QM32R",
+          "host": "10.10.1.41",
+          "port": 1515,
+          "protocol": "tcp",
+          "web_protocol": "http",
+          "web_port": 80,
+          "tags": ["display", "video"]
+        },
+        {
+          "id": "mel-1a-disp-witness",
+          "name": "Witness Stand Monitor",
+          "type": "display",
+          "manufacturer": "Samsung",
+          "model": "QM32R",
+          "host": "10.10.1.42",
+          "port": 1515,
+          "protocol": "tcp",
+          "web_protocol": "http",
+          "web_port": 80,
+          "tags": ["display", "video"]
+        },
+        {
+          "id": "mel-1a-disp-prosecution",
+          "name": "Prosecution Counsel Monitor",
+          "type": "display",
+          "manufacturer": "Samsung",
+          "model": "QM43R",
+          "host": "10.10.1.43",
+          "port": 1515,
+          "protocol": "tcp",
+          "web_protocol": "http",
+          "web_port": 80,
+          "tags": ["display", "video"]
+        },
+        {
+          "id": "mel-1a-disp-defense",
+          "name": "Defense Counsel Monitor",
+          "type": "display",
+          "manufacturer": "Samsung",
+          "model": "QM43R",
+          "host": "10.10.1.44",
+          "port": 1515,
+          "protocol": "tcp",
+          "web_protocol": "http",
+          "web_port": 80,
+          "tags": ["display", "video"]
+        },
+        {
+          "id": "mel-1a-disp-gallery",
+          "name": "Gallery Evidence Display",
+          "type": "display",
+          "manufacturer": "Samsung",
+          "model": "QM75R",
+          "host": "10.10.1.45",
+          "port": 1515,
+          "protocol": "tcp",
+          "web_protocol": "http",
+          "web_port": 80,
+          "tags": ["display", "video"]
+        },
+        {
+          "id": "mel-1a-disp-jury",
+          "name": "Jury Box Monitor",
+          "type": "display",
+          "manufacturer": "NEC",
+          "model": "MA431",
+          "host": "10.10.1.47",
+          "port": 7142,
+          "protocol": "tcp",
+          "web_protocol": "http",
+          "web_port": 80,
+          "tags": ["display", "video"]
+        },
+        {
+          "id": "mel-1a-doc-cam",
+          "name": "Evidence Document Camera",
+          "type": "document_camera",
+          "manufacturer": "ELMO",
+          "model": "PX-30E",
+          "host": "10.10.1.60",
+          "port": 80,
+          "protocol": "http",
+          "tags": ["camera", "evidence"]
+        },
+        {
+          "id": "mel-1a-recorder",
+          "name": "JAVS Digital Court Recorder",
+          "type": "recorder",
+          "manufacturer": "JAVS",
+          "model": "Notewise 7",
+          "host": "10.10.1.50",
+          "port": 443,
+          "protocol": "https",
+          "web_protocol": "https",
+          "web_port": 443,
+          "web_path": "/admin",
+          "recording_status_url": "https://10.10.1.50/api/recording/status",
+          "recording_status_json_path": "state.recording",
+          "recording_start_url": "https://10.10.1.50/api/recording/start",
+          "recording_stop_url": "https://10.10.1.50/api/recording/stop",
+          "tags": ["recording"],
+          "commands": [
+            {
+              "id": "start-recording",
+              "label": "Start Recording",
+              "protocol": "https",
+              "method": "POST",
+              "url": "https://{host}/api/recording/start",
+              "verify_tls": false
+            },
+            {
+              "id": "stop-recording",
+              "label": "Stop Recording",
+              "protocol": "https",
+              "method": "POST",
+              "url": "https://{host}/api/recording/stop",
+              "verify_tls": false
+            },
+            {
+              "id": "pause-recording",
+              "label": "Pause Recording",
+              "protocol": "https",
+              "method": "POST",
+              "url": "https://{host}/api/recording/pause",
+              "verify_tls": false
+            },
+            {
+              "id": "get-status",
+              "label": "Recording Status",
+              "protocol": "https",
+              "url": "https://{host}/api/recording/status",
+              "verify_tls": false
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "mel-2b",
+      "name": "Courtroom 2B",
+      "city": "Melbourne",
+      "location": "Level 2 — West Wing",
+      "notes": "Civil matters and arraignment hearings. Vaddio PTZ cameras with QSC audio. No VC codec — remote appearances handled via Courtroom 1A overflow.",
+      "devices": [
+        {
+          "id": "mel-2b-ctrl",
+          "name": "Crestron Control Processor",
+          "type": "control_processor",
+          "manufacturer": "Crestron",
+          "model": "CP4N",
+          "host": "10.10.2.10",
+          "port": 41794,
+          "protocol": "tcp",
+          "web_protocol": "http",
+          "web_port": 80,
+          "tags": ["control", "automation"]
+        },
+        {
+          "id": "mel-2b-ptz-overview",
+          "name": "Room Overview PTZ Camera",
+          "type": "ptz_camera",
+          "manufacturer": "Vaddio",
+          "model": "RoboSHOT 12E",
+          "host": "10.10.2.21",
+          "port": 80,
+          "protocol": "http",
+          "tags": ["camera", "video"],
+          "commands": [
+            {
+              "id": "preset-1",
+              "label": "Preset 1 — Home",
+              "protocol": "http",
+              "method": "POST",
+              "url": "http://{host}/api/camera/preset/recall",
+              "headers": {"Content-Type": "application/json"},
+              "body": "{\"id\": 1}",
+              "auth": {"username": "admin", "password": "changeme"}
+            },
+            {
+              "id": "preset-2",
+              "label": "Preset 2 — Wide",
+              "protocol": "http",
+              "method": "POST",
+              "url": "http://{host}/api/camera/preset/recall",
+              "headers": {"Content-Type": "application/json"},
+              "body": "{\"id\": 2}",
+              "auth": {"username": "admin", "password": "changeme"}
+            },
+            {
+              "id": "preset-3",
+              "label": "Preset 3 — Gallery",
+              "protocol": "http",
+              "method": "POST",
+              "url": "http://{host}/api/camera/preset/recall",
+              "headers": {"Content-Type": "application/json"},
+              "body": "{\"id\": 3}",
+              "auth": {"username": "admin", "password": "changeme"}
+            }
+          ]
+        },
+        {
+          "id": "mel-2b-ptz-witness",
+          "name": "Witness Stand PTZ Camera",
+          "type": "ptz_camera",
+          "manufacturer": "Vaddio",
+          "model": "RoboSHOT 12E",
+          "host": "10.10.2.22",
+          "port": 80,
+          "protocol": "http",
+          "tags": ["camera", "video"],
+          "commands": [
+            {
+              "id": "preset-1",
+              "label": "Preset 1 — Home",
+              "protocol": "http",
+              "method": "POST",
+              "url": "http://{host}/api/camera/preset/recall",
+              "headers": {"Content-Type": "application/json"},
+              "body": "{\"id\": 1}",
+              "auth": {"username": "admin", "password": "changeme"}
+            },
+            {
+              "id": "preset-2",
+              "label": "Preset 2 — Close-up",
+              "protocol": "http",
+              "method": "POST",
+              "url": "http://{host}/api/camera/preset/recall",
+              "headers": {"Content-Type": "application/json"},
+              "body": "{\"id\": 2}",
+              "auth": {"username": "admin", "password": "changeme"}
+            },
+            {
+              "id": "preset-recall",
+              "label": "Recall Preset…",
+              "protocol": "http",
+              "method": "POST",
+              "url": "http://{host}/api/camera/preset/recall",
+              "headers": {"Content-Type": "application/json"},
+              "body": "{\"id\": {value}}",
+              "prompt": "Preset number (1–16)",
+              "auth": {"username": "admin", "password": "changeme"}
+            }
+          ]
+        },
+        {
+          "id": "mel-2b-dsp",
+          "name": "QSC Core 110f",
+          "type": "audio_dsp",
+          "manufacturer": "QSC",
+          "model": "Core 110f",
+          "host": "10.10.2.30",
+          "port": 1710,
+          "protocol": "tcp",
+          "web_protocol": "http",
+          "web_port": 80,
+          "tags": ["audio", "dsp"],
+          "commands": [
+            {
+              "id": "mute-on",
+              "label": "Mute All Outputs",
+              "protocol": "tcp",
+              "payload": "sa NamedControlSet MainMute 1\n"
+            },
+            {
+              "id": "mute-off",
+              "label": "Unmute All Outputs",
+              "protocol": "tcp",
+              "payload": "sa NamedControlSet MainMute 0\n"
+            },
+            {
+              "id": "set-level",
+              "label": "Set Master Level…",
+              "protocol": "tcp",
+              "payload": "sa NamedControlSet MainVolume {value}\n",
+              "prompt": "Level in dB (e.g. -6)",
+              "read_response": true
+            },
+            {
+              "id": "get-level",
+              "label": "Query Master Level",
+              "protocol": "tcp",
+              "payload": "sg NamedControlGet MainVolume\n",
+              "read_response": true
+            }
+          ]
+        },
+        {
+          "id": "mel-2b-disp-judge",
+          "name": "Judge Bench Monitor",
+          "type": "display",
+          "manufacturer": "Samsung",
+          "model": "QM32R",
+          "host": "10.10.2.41",
+          "port": 1515,
+          "protocol": "tcp",
+          "web_protocol": "http",
+          "web_port": 80,
+          "tags": ["display", "video"]
+        },
+        {
+          "id": "mel-2b-disp-gallery",
+          "name": "Gallery Evidence Display",
+          "type": "display",
+          "manufacturer": "Samsung",
+          "model": "QM55R",
+          "host": "10.10.2.42",
+          "port": 1515,
+          "protocol": "tcp",
+          "web_protocol": "http",
+          "web_port": 80,
+          "tags": ["display", "video"]
+        },
+        {
+          "id": "mel-2b-disp-counsel",
+          "name": "Counsel Tables Monitor",
+          "type": "display",
+          "manufacturer": "Samsung",
+          "model": "QM43R",
+          "host": "10.10.2.43",
+          "port": 1515,
+          "protocol": "tcp",
+          "web_protocol": "http",
+          "web_port": 80,
+          "tags": ["display", "video"]
+        },
+        {
+          "id": "mel-2b-disp-witness",
+          "name": "Witness Stand Monitor",
+          "type": "display",
+          "manufacturer": "Samsung",
+          "model": "QM32R",
+          "host": "10.10.2.44",
+          "port": 1515,
+          "protocol": "tcp",
+          "web_protocol": "http",
+          "web_port": 80,
+          "tags": ["display", "video"]
+        },
+        {
+          "id": "mel-2b-doc-cam",
+          "name": "Evidence Document Camera",
+          "type": "document_camera",
+          "manufacturer": "ELMO",
+          "model": "PX-30E",
+          "host": "10.10.2.60",
+          "port": 80,
+          "protocol": "http",
+          "tags": ["camera", "evidence"]
+        },
+        {
+          "id": "mel-2b-recorder",
+          "name": "JAVS Digital Court Recorder",
+          "type": "recorder",
+          "manufacturer": "JAVS",
+          "model": "Notewise 7",
+          "host": "10.10.2.50",
+          "port": 443,
+          "protocol": "https",
+          "web_protocol": "https",
+          "web_port": 443,
+          "web_path": "/admin",
+          "recording_status_url": "https://10.10.2.50/api/recording/status",
+          "recording_status_json_path": "state.recording",
+          "recording_start_url": "https://10.10.2.50/api/recording/start",
+          "recording_stop_url": "https://10.10.2.50/api/recording/stop",
+          "tags": ["recording"],
+          "commands": [
+            {
+              "id": "start-recording",
+              "label": "Start Recording",
+              "protocol": "https",
+              "method": "POST",
+              "url": "https://{host}/api/recording/start",
+              "verify_tls": false
+            },
+            {
+              "id": "stop-recording",
+              "label": "Stop Recording",
+              "protocol": "https",
+              "method": "POST",
+              "url": "https://{host}/api/recording/stop",
+              "verify_tls": false
+            },
+            {
+              "id": "get-status",
+              "label": "Recording Status",
+              "protocol": "https",
+              "url": "https://{host}/api/recording/status",
+              "verify_tls": false
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "syd-7",
+      "name": "Courtroom 7",
+      "city": "Sydney",
+      "location": "Ground Floor — Downing Centre",
+      "notes": "Directions hearings and mentions. Cisco Webex codec for remote appearances. Simpler AV layout — no AV-over-IP distribution.",
+      "devices": [
+        {
+          "id": "syd-7-ctrl",
+          "name": "Crestron Control Processor",
+          "type": "control_processor",
+          "manufacturer": "Crestron",
+          "model": "CP4N",
+          "host": "10.20.7.10",
+          "port": 41794,
+          "protocol": "tcp",
+          "web_protocol": "http",
+          "web_port": 80,
+          "tags": ["control", "automation"]
+        },
+        {
+          "id": "syd-7-webex",
+          "name": "Cisco Webex Room Kit",
           "type": "cisco_webex",
           "manufacturer": "Cisco",
-          "model": "Room Kit Pro",
-          "host": "10.30.3.5",
+          "model": "Room Kit",
+          "host": "10.20.7.5",
           "port": 443,
           "protocol": "https",
           "web_protocol": "https",
@@ -359,8 +994,265 @@
           ]
         },
         {
-          "id": "3c-poly-studiox",
-          "name": "Poly Studio X (Alt. VC Unit)",
+          "id": "syd-7-ptz-overview",
+          "name": "Room Overview PTZ Camera",
+          "type": "ptz_camera",
+          "manufacturer": "Sony",
+          "model": "SRG-300H",
+          "host": "10.20.7.21",
+          "port": 80,
+          "protocol": "http",
+          "tags": ["camera", "video"],
+          "commands": [
+            {
+              "id": "preset-home",
+              "label": "Home Position",
+              "protocol": "http",
+              "url": "http://{host}/command/presetposition.cgi?PresetCall=0&PresetSpeed=24"
+            },
+            {
+              "id": "preset-wide",
+              "label": "Wide Shot",
+              "protocol": "http",
+              "url": "http://{host}/command/presetposition.cgi?PresetCall=1&PresetSpeed=24"
+            },
+            {
+              "id": "preset-bench",
+              "label": "Judge's Bench",
+              "protocol": "http",
+              "url": "http://{host}/command/presetposition.cgi?PresetCall=2&PresetSpeed=24"
+            }
+          ]
+        },
+        {
+          "id": "syd-7-ptz-witness",
+          "name": "Witness Stand PTZ Camera",
+          "type": "ptz_camera",
+          "manufacturer": "Sony",
+          "model": "SRG-300H",
+          "host": "10.20.7.22",
+          "port": 80,
+          "protocol": "http",
+          "tags": ["camera", "video"],
+          "commands": [
+            {
+              "id": "preset-home",
+              "label": "Home Position",
+              "protocol": "http",
+              "url": "http://{host}/command/presetposition.cgi?PresetCall=0&PresetSpeed=24"
+            },
+            {
+              "id": "preset-closeup",
+              "label": "Close-up Preset",
+              "protocol": "http",
+              "url": "http://{host}/command/presetposition.cgi?PresetCall=1&PresetSpeed=24"
+            }
+          ]
+        },
+        {
+          "id": "syd-7-dsp",
+          "name": "QSC Core 110f",
+          "type": "audio_dsp",
+          "manufacturer": "QSC",
+          "model": "Core 110f",
+          "host": "10.20.7.30",
+          "port": 1710,
+          "protocol": "tcp",
+          "web_protocol": "http",
+          "web_port": 80,
+          "tags": ["audio", "dsp"],
+          "commands": [
+            {
+              "id": "mute-on",
+              "label": "Mute All Outputs",
+              "protocol": "tcp",
+              "payload": "sa NamedControlSet MainMute 1\n"
+            },
+            {
+              "id": "mute-off",
+              "label": "Unmute All Outputs",
+              "protocol": "tcp",
+              "payload": "sa NamedControlSet MainMute 0\n"
+            },
+            {
+              "id": "get-level",
+              "label": "Query Master Level",
+              "protocol": "tcp",
+              "payload": "sg NamedControlGet MainVolume\n",
+              "read_response": true
+            }
+          ]
+        },
+        {
+          "id": "syd-7-disp-judge",
+          "name": "Judge Bench Monitor",
+          "type": "display",
+          "manufacturer": "Samsung",
+          "model": "QM32R",
+          "host": "10.20.7.41",
+          "port": 1515,
+          "protocol": "tcp",
+          "web_protocol": "http",
+          "web_port": 80,
+          "tags": ["display", "video"]
+        },
+        {
+          "id": "syd-7-disp-gallery",
+          "name": "Gallery Evidence Display",
+          "type": "display",
+          "manufacturer": "Samsung",
+          "model": "QM55R",
+          "host": "10.20.7.42",
+          "port": 1515,
+          "protocol": "tcp",
+          "web_protocol": "http",
+          "web_port": 80,
+          "tags": ["display", "video"]
+        },
+        {
+          "id": "syd-7-recorder",
+          "name": "JAVS Digital Court Recorder",
+          "type": "recorder",
+          "manufacturer": "JAVS",
+          "model": "Notewise 7",
+          "host": "10.20.7.50",
+          "port": 443,
+          "protocol": "https",
+          "web_protocol": "https",
+          "web_port": 443,
+          "web_path": "/admin",
+          "recording_status_url": "https://10.20.7.50/api/recording/status",
+          "recording_status_json_path": "state.recording",
+          "recording_start_url": "https://10.20.7.50/api/recording/start",
+          "recording_stop_url": "https://10.20.7.50/api/recording/stop",
+          "tags": ["recording"],
+          "commands": [
+            {
+              "id": "start-recording",
+              "label": "Start Recording",
+              "protocol": "https",
+              "method": "POST",
+              "url": "https://{host}/api/recording/start",
+              "verify_tls": false
+            },
+            {
+              "id": "stop-recording",
+              "label": "Stop Recording",
+              "protocol": "https",
+              "method": "POST",
+              "url": "https://{host}/api/recording/stop",
+              "verify_tls": false
+            },
+            {
+              "id": "get-status",
+              "label": "Recording Status",
+              "protocol": "https",
+              "url": "https://{host}/api/recording/status",
+              "verify_tls": false
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "bri-3c",
+      "name": "Courtroom 3C",
+      "city": "Brisbane",
+      "location": "Level 3 — QEII Courts of Law",
+      "notes": "Remote appearances courtroom. Dual VC codecs (Cisco primary, Poly backup). Full Blustream AV-over-IP distribution across the counsel, witness, and gallery zones.",
+      "devices": [
+        {
+          "id": "bri-3c-ctrl",
+          "name": "Crestron Control Processor",
+          "type": "control_processor",
+          "manufacturer": "Crestron",
+          "model": "CP4N",
+          "host": "10.30.3.10",
+          "port": 41794,
+          "protocol": "tcp",
+          "web_protocol": "http",
+          "web_port": 80,
+          "tags": ["control", "automation"]
+        },
+        {
+          "id": "bri-3c-webex",
+          "name": "Cisco Webex Room Kit Pro",
+          "type": "cisco_webex",
+          "manufacturer": "Cisco",
+          "model": "Room Kit Pro",
+          "host": "10.30.3.5",
+          "port": 443,
+          "protocol": "https",
+          "web_protocol": "https",
+          "web_port": 443,
+          "tags": ["video-conference", "vc"],
+          "commands": [
+            {
+              "id": "dial",
+              "label": "Place Call…",
+              "protocol": "https",
+              "method": "POST",
+              "url": "https://{host}/putxml",
+              "body": "<Command><Dial><Number>{value}</Number></Dial></Command>",
+              "prompt": "Address or number to dial",
+              "auth": {"username": "admin", "password": "changeme"},
+              "verify_tls": false
+            },
+            {
+              "id": "hangup",
+              "label": "Hang Up",
+              "protocol": "https",
+              "method": "POST",
+              "url": "https://{host}/putxml",
+              "body": "<Command><Call><Disconnect/></Call></Command>",
+              "auth": {"username": "admin", "password": "changeme"},
+              "verify_tls": false
+            },
+            {
+              "id": "standby-on",
+              "label": "Standby On",
+              "protocol": "https",
+              "method": "POST",
+              "url": "https://{host}/putxml",
+              "body": "<Command><Standby><Activate/></Standby></Command>",
+              "auth": {"username": "admin", "password": "changeme"},
+              "verify_tls": false
+            },
+            {
+              "id": "standby-off",
+              "label": "Standby Off",
+              "protocol": "https",
+              "method": "POST",
+              "url": "https://{host}/putxml",
+              "body": "<Command><Standby><Deactivate/></Standby></Command>",
+              "auth": {"username": "admin", "password": "changeme"},
+              "verify_tls": false
+            },
+            {
+              "id": "mute-mic",
+              "label": "Mute Microphone",
+              "protocol": "https",
+              "method": "POST",
+              "url": "https://{host}/putxml",
+              "body": "<Command><Audio><Microphones><Mute/></Microphones></Audio></Command>",
+              "auth": {"username": "admin", "password": "changeme"},
+              "verify_tls": false
+            },
+            {
+              "id": "unmute-mic",
+              "label": "Unmute Microphone",
+              "protocol": "https",
+              "method": "POST",
+              "url": "https://{host}/putxml",
+              "body": "<Command><Audio><Microphones><Unmute/></Microphones></Audio></Command>",
+              "auth": {"username": "admin", "password": "changeme"},
+              "verify_tls": false
+            }
+          ]
+        },
+        {
+          "id": "bri-3c-poly",
+          "name": "Poly Studio X50 (Backup VC)",
           "type": "poly",
           "manufacturer": "Poly",
           "model": "Studio X50",
@@ -381,6 +1273,371 @@
               "body": "{\"address\": \"{value}\", \"rate\": 1920, \"dialType\": \"SIP\"}",
               "prompt": "SIP address to dial",
               "auth": {"username": "admin", "password": "changeme"},
+              "verify_tls": false
+            },
+            {
+              "id": "hangup",
+              "label": "Hang Up",
+              "protocol": "https",
+              "method": "DELETE",
+              "url": "https://{host}/rest/conferences/active",
+              "auth": {"username": "admin", "password": "changeme"},
+              "verify_tls": false
+            },
+            {
+              "id": "mute",
+              "label": "Mute Microphone",
+              "protocol": "https",
+              "method": "POST",
+              "url": "https://{host}/rest/audio/mute",
+              "headers": {"Content-Type": "application/json"},
+              "body": "{\"mute\": true}",
+              "auth": {"username": "admin", "password": "changeme"},
+              "verify_tls": false
+            },
+            {
+              "id": "unmute",
+              "label": "Unmute Microphone",
+              "protocol": "https",
+              "method": "POST",
+              "url": "https://{host}/rest/audio/mute",
+              "headers": {"Content-Type": "application/json"},
+              "body": "{\"mute\": false}",
+              "auth": {"username": "admin", "password": "changeme"},
+              "verify_tls": false
+            }
+          ]
+        },
+        {
+          "id": "bri-3c-dsp",
+          "name": "Biamp TesiraFORTE AVB",
+          "type": "audio_dsp",
+          "manufacturer": "Biamp",
+          "model": "TesiraFORTE AVB CI",
+          "host": "10.30.3.20",
+          "port": 23,
+          "protocol": "tcp",
+          "web_protocol": "http",
+          "web_port": 80,
+          "tags": ["audio", "dsp"],
+          "commands": [
+            {
+              "id": "mute-on",
+              "label": "Mute All Outputs",
+              "protocol": "tcp",
+              "payload": "LevelControl 1 set mute true\n"
+            },
+            {
+              "id": "mute-off",
+              "label": "Unmute All Outputs",
+              "protocol": "tcp",
+              "payload": "LevelControl 1 set mute false\n"
+            },
+            {
+              "id": "set-level",
+              "label": "Set Master Level…",
+              "protocol": "tcp",
+              "payload": "LevelControl 1 set level 0 {value}\n",
+              "prompt": "Level in dB (e.g. -6.0)",
+              "read_response": true
+            },
+            {
+              "id": "get-status",
+              "label": "Device Status",
+              "protocol": "tcp",
+              "payload": "DEVICE get networkStatus\n",
+              "read_response": true
+            }
+          ]
+        },
+        {
+          "id": "bri-3c-ptz-overview",
+          "name": "Room Overview PTZ Camera",
+          "type": "ptz_camera",
+          "manufacturer": "Sony",
+          "model": "SRG-X400",
+          "host": "10.30.3.21",
+          "port": 80,
+          "protocol": "http",
+          "tags": ["camera", "video"],
+          "commands": [
+            {
+              "id": "preset-home",
+              "label": "Home Position",
+              "protocol": "http",
+              "url": "http://{host}/command/presetposition.cgi?PresetCall=0&PresetSpeed=24"
+            },
+            {
+              "id": "preset-wide",
+              "label": "Wide Shot",
+              "protocol": "http",
+              "url": "http://{host}/command/presetposition.cgi?PresetCall=1&PresetSpeed=24"
+            },
+            {
+              "id": "preset-vc-screen",
+              "label": "VC Screen View",
+              "protocol": "http",
+              "url": "http://{host}/command/presetposition.cgi?PresetCall=3&PresetSpeed=24"
+            }
+          ]
+        },
+        {
+          "id": "bri-3c-ptz-witness",
+          "name": "Witness Stand PTZ Camera",
+          "type": "ptz_camera",
+          "manufacturer": "Sony",
+          "model": "SRG-X400",
+          "host": "10.30.3.22",
+          "port": 80,
+          "protocol": "http",
+          "tags": ["camera", "video"],
+          "commands": [
+            {
+              "id": "preset-home",
+              "label": "Home Position",
+              "protocol": "http",
+              "url": "http://{host}/command/presetposition.cgi?PresetCall=0&PresetSpeed=24"
+            },
+            {
+              "id": "preset-closeup",
+              "label": "Close-up Preset",
+              "protocol": "http",
+              "url": "http://{host}/command/presetposition.cgi?PresetCall=1&PresetSpeed=24"
+            }
+          ]
+        },
+        {
+          "id": "bri-3c-matrix",
+          "name": "Blustream Video Matrix",
+          "type": "video_matrix",
+          "manufacturer": "Blustream",
+          "model": "MC80",
+          "host": "10.30.3.30",
+          "port": 23,
+          "protocol": "telnet",
+          "web_protocol": "http",
+          "web_port": 80,
+          "tags": ["video", "matrix", "distribution"],
+          "commands": [
+            {
+              "id": "route-all-bench",
+              "label": "All Displays ← Bench PC",
+              "protocol": "tcp",
+              "payload": "MATRIX SET ALL IN 1\r\n"
+            },
+            {
+              "id": "route-judge-bench",
+              "label": "Judge ← Bench PC",
+              "protocol": "tcp",
+              "payload": "MATRIX SET OUT 1 IN 1\r\n"
+            },
+            {
+              "id": "route-gallery-bench",
+              "label": "Gallery ← Bench PC",
+              "protocol": "tcp",
+              "payload": "MATRIX SET OUT 2 IN 1\r\n"
+            },
+            {
+              "id": "route-witness-bench",
+              "label": "Witness ← Bench PC",
+              "protocol": "tcp",
+              "payload": "MATRIX SET OUT 3 IN 1\r\n"
+            },
+            {
+              "id": "route-all-vc",
+              "label": "All Displays ← VC Codec",
+              "protocol": "tcp",
+              "payload": "MATRIX SET ALL IN 4\r\n"
+            },
+            {
+              "id": "route-custom",
+              "label": "Route Output…",
+              "protocol": "tcp",
+              "payload": "{value}\r\n",
+              "prompt": "Routing command (e.g. MATRIX SET OUT 2 IN 3)",
+              "read_response": true
+            },
+            {
+              "id": "query-routing",
+              "label": "Query Current Routing",
+              "protocol": "tcp",
+              "payload": "STATUS\r\n",
+              "read_response": true
+            }
+          ]
+        },
+        {
+          "id": "bri-3c-tx-bench",
+          "name": "Bench PC Encoder (TX-1)",
+          "type": "video_encoder",
+          "manufacturer": "Blustream",
+          "model": "IP200UHD-TX",
+          "host": "192.168.3.21",
+          "port": 80,
+          "protocol": "http",
+          "tags": ["video", "av-over-ip", "tx"],
+          "commands": [
+            {
+              "id": "reboot",
+              "label": "Reboot Encoder",
+              "protocol": "http",
+              "url": "http://{host}/reboot"
+            },
+            {
+              "id": "status",
+              "label": "Get Status",
+              "protocol": "http",
+              "url": "http://{host}/status"
+            }
+          ]
+        },
+        {
+          "id": "bri-3c-tx-witness",
+          "name": "Witness PC Encoder (TX-2)",
+          "type": "video_encoder",
+          "manufacturer": "Blustream",
+          "model": "IP200UHD-TX",
+          "host": "192.168.3.22",
+          "port": 80,
+          "protocol": "http",
+          "tags": ["video", "av-over-ip", "tx"],
+          "commands": [
+            {
+              "id": "reboot",
+              "label": "Reboot Encoder",
+              "protocol": "http",
+              "url": "http://{host}/reboot"
+            }
+          ]
+        },
+        {
+          "id": "bri-3c-rx-judge",
+          "name": "Judge Bench Decoder (RX-1)",
+          "type": "video_decoder",
+          "manufacturer": "Blustream",
+          "model": "IP200UHD-RX",
+          "host": "192.168.3.31",
+          "port": 80,
+          "protocol": "http",
+          "tags": ["video", "av-over-ip", "rx"],
+          "commands": [
+            {
+              "id": "reboot",
+              "label": "Reboot Decoder",
+              "protocol": "http",
+              "url": "http://{host}/reboot"
+            },
+            {
+              "id": "status",
+              "label": "Get Status",
+              "protocol": "http",
+              "url": "http://{host}/status"
+            }
+          ]
+        },
+        {
+          "id": "bri-3c-rx-gallery",
+          "name": "Gallery Display Decoder (RX-2)",
+          "type": "video_decoder",
+          "manufacturer": "Blustream",
+          "model": "IP200UHD-RX",
+          "host": "192.168.3.32",
+          "port": 80,
+          "protocol": "http",
+          "tags": ["video", "av-over-ip", "rx"],
+          "commands": [
+            {
+              "id": "reboot",
+              "label": "Reboot Decoder",
+              "protocol": "http",
+              "url": "http://{host}/reboot"
+            }
+          ]
+        },
+        {
+          "id": "bri-3c-rx-witness",
+          "name": "Witness Stand Decoder (RX-3)",
+          "type": "video_decoder",
+          "manufacturer": "Blustream",
+          "model": "IP200UHD-RX",
+          "host": "192.168.3.33",
+          "port": 80,
+          "protocol": "http",
+          "tags": ["video", "av-over-ip", "rx"],
+          "commands": [
+            {
+              "id": "reboot",
+              "label": "Reboot Decoder",
+              "protocol": "http",
+              "url": "http://{host}/reboot"
+            }
+          ]
+        },
+        {
+          "id": "bri-3c-disp-judge",
+          "name": "Judge Bench Monitor",
+          "type": "display",
+          "manufacturer": "Samsung",
+          "model": "QM43R",
+          "host": "10.30.3.41",
+          "port": 1515,
+          "protocol": "tcp",
+          "web_protocol": "http",
+          "web_port": 80,
+          "tags": ["display", "video"]
+        },
+        {
+          "id": "bri-3c-disp-gallery",
+          "name": "Gallery Evidence Display",
+          "type": "display",
+          "manufacturer": "Samsung",
+          "model": "QM75R",
+          "host": "10.30.3.42",
+          "port": 1515,
+          "protocol": "tcp",
+          "web_protocol": "http",
+          "web_port": 80,
+          "tags": ["display", "video"]
+        },
+        {
+          "id": "bri-3c-recorder",
+          "name": "JAVS Digital Court Recorder",
+          "type": "recorder",
+          "manufacturer": "JAVS",
+          "model": "Notewise 7",
+          "host": "10.30.3.50",
+          "port": 443,
+          "protocol": "https",
+          "web_protocol": "https",
+          "web_port": 443,
+          "web_path": "/admin",
+          "recording_status_url": "https://10.30.3.50/api/recording/status",
+          "recording_status_json_path": "state.recording",
+          "recording_start_url": "https://10.30.3.50/api/recording/start",
+          "recording_stop_url": "https://10.30.3.50/api/recording/stop",
+          "tags": ["recording"],
+          "commands": [
+            {
+              "id": "start-recording",
+              "label": "Start Recording",
+              "protocol": "https",
+              "method": "POST",
+              "url": "https://{host}/api/recording/start",
+              "verify_tls": false
+            },
+            {
+              "id": "stop-recording",
+              "label": "Stop Recording",
+              "protocol": "https",
+              "method": "POST",
+              "url": "https://{host}/api/recording/stop",
+              "verify_tls": false
+            },
+            {
+              "id": "get-status",
+              "label": "Recording Status",
+              "protocol": "https",
+              "url": "https://{host}/api/recording/status",
               "verify_tls": false
             }
           ]
