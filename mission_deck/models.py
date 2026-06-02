@@ -412,6 +412,44 @@ class Recorder(Device):
         return str(path).strip() if isinstance(path, str) and path.strip() else ""
 
 
+@register_device(
+    "video_matrix", "matrix_switcher", "av_matrix", "blustream",
+    "nvx", "extron_matrix", "amx_matrix", "atlona", "wyrestorm",
+)
+@dataclass(slots=True)
+class VideoMatrix(Device):
+    """Video matrix / AV-over-IP switcher controller (Blustream, Crestron NVX, …)."""
+
+    category: str = "Video Matrix"
+
+
+@register_device("video_encoder", "av_encoder", "encoder", "tx", "blustream_tx", "nvx_tx")
+@dataclass(slots=True)
+class VideoEncoder(Device):
+    """AV-over-IP transmit endpoint (encoder/TX), typically on the in-room LAN."""
+
+    category: str = "Video Encoder (TX)"
+
+
+@register_device("video_decoder", "av_decoder", "decoder", "rx", "blustream_rx", "nvx_rx")
+@dataclass(slots=True)
+class VideoDecoder(Device):
+    """AV-over-IP receive endpoint (decoder/RX), typically on the in-room LAN."""
+
+    category: str = "Video Decoder (RX)"
+
+
+@register_device(
+    "vc_codec", "video_conference", "codec", "cisco_webex", "webex",
+    "poly", "lifesize", "zoom_room",
+)
+@dataclass(slots=True)
+class VideoConferenceCodec(Device):
+    """Video-conferencing codec (Cisco Webex, Poly, Lifesize, Zoom Room, …)."""
+
+    category: str = "Video Conferencing"
+
+
 @dataclass(slots=True)
 class GenericDevice(Device):
     """Fallback for device types not explicitly modelled."""

@@ -22,13 +22,15 @@ so cards flip green/red live, as results stream in, without freezing.
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import socket
+import ssl
 import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
-from typing import Any, Callable, Iterable
+from typing import Any, Callable, Iterable, Mapping, Sequence
 
 from .models import Device, DeviceStatus, RecordingStatus
 
@@ -117,11 +119,43 @@ def run_status_checks(
 # synchronous, and timeout-bounded — a single command at a time — and meant to
 # be executed off the UI thread by the app's background runner.
 
-def http_get(url: str, timeout: float = 5.0) -> str:
-    """Issue an HTTP(S) GET and return a short human-readable result."""
+def http_request(
+    url: str,
+    method: str = "GET",
+    body: str | None = None,
+    timeout: float = 5.0,
+    auth: Sequence[str] | None = None,
+    headers: Mapping[str, Any] | None = None,
+    verify_tls: bool = True,
+) -> str:
+    """Issue an HTTP(S) request and return a short human-readable result.
+
+    Supports the GET-style probes used by simple devices *and* the POST-with-body
+    APIs that VC codecs (Cisco xCommand, Poly) speak. All extras are optional:
+
+      * ``method``     — "GET" (default), "POST", etc.
+      * ``body``       — request body (str, sent UTF-8 encoded).
+      * ``auth``       — ``(username, password)`` → an ``Authorization: Basic`` header.
+      * ``headers``    — extra request headers.
+      * ``verify_tls`` — when ``False``, skip certificate verification (courtroom
+                         codecs commonly present self-signed certs on the LAN).
+    """
+
+    data = body.encode("utf-8", errors="replace") if body is not None else None
+    request = urllib.request.Request(url, data=data, method=method.upper())
+    for key, value in (headers or {}).items():
+        request.add_header(str(key), str(value))
+    if auth is not None:
+        user, password = auth[0], auth[1]
+        token = base64.b64encode(f"{user}:{password}".encode("utf-8")).decode("ascii")
+        request.add_header("Authorization", f"Basic {token}")
+
+    context: ssl.SSLContext | None = None
+    if not verify_tls:
+        context = ssl._create_unverified_context()
 
     try:
-        with urllib.request.urlopen(url, timeout=timeout) as response:
+        with urllib.request.urlopen(request, timeout=timeout, context=context) as response:
             status = getattr(response, "status", response.getcode())
             return f"HTTP {status} OK"
     except urllib.error.HTTPError as exc:
@@ -130,6 +164,12 @@ def http_get(url: str, timeout: float = 5.0) -> str:
     except (urllib.error.URLError, OSError, ValueError) as exc:
         reason = getattr(exc, "reason", exc)
         raise ControlError(f"Request failed: {reason}") from exc
+
+
+def http_get(url: str, timeout: float = 5.0) -> str:
+    """Issue an HTTP(S) GET and return a short human-readable result."""
+
+    return http_request(url, method="GET", timeout=timeout)
 
 
 def tcp_send(

@@ -201,6 +201,191 @@
           "tags": ["audio"]
         }
       ]
+    },
+    {
+      "id": "courtroom-3c",
+      "name": "Courtroom 3C",
+      "city": "Brisbane",
+      "location": "3rd Floor - Video Distribution",
+      "notes": "Blustream AV-over-IP distribution with Cisco Webex conferencing.",
+      "devices": [
+        {
+          "id": "3c-blustream-matrix",
+          "name": "Blustream Video Matrix",
+          "type": "video_matrix",
+          "manufacturer": "Blustream",
+          "model": "Multicast Controller",
+          "host": "10.30.3.10",
+          "port": 23,
+          "protocol": "telnet",
+          "web_protocol": "http",
+          "web_port": 80,
+          "tags": ["video", "matrix", "distribution"],
+          "commands": [
+            {
+              "id": "route-gallery-bench",
+              "label": "Gallery Display ← Bench PC",
+              "protocol": "tcp",
+              "payload": "MATRIX SET OUT 1 IN 1\r\n"
+            },
+            {
+              "id": "route-prompt",
+              "label": "Route Output…",
+              "protocol": "tcp",
+              "payload": "{value}\r\n",
+              "prompt": "Routing command (e.g. MATRIX SET OUT 2 IN 3)",
+              "read_response": true
+            },
+            {
+              "id": "query-routing",
+              "label": "Query Routing",
+              "protocol": "tcp",
+              "payload": "STATUS\r\n",
+              "read_response": true
+            }
+          ]
+        },
+        {
+          "id": "3c-blustream-tx-bench",
+          "name": "Bench PC Encoder (TX)",
+          "type": "video_encoder",
+          "manufacturer": "Blustream",
+          "model": "IP200UHD-TX",
+          "host": "192.168.3.21",
+          "port": 80,
+          "protocol": "http",
+          "tags": ["video", "av-over-ip", "tx"],
+          "commands": [
+            {
+              "id": "reboot",
+              "label": "Reboot Encoder",
+              "protocol": "http",
+              "url": "http://{host}/reboot"
+            }
+          ]
+        },
+        {
+          "id": "3c-blustream-rx-gallery",
+          "name": "Gallery Display Decoder (RX)",
+          "type": "video_decoder",
+          "manufacturer": "Blustream",
+          "model": "IP200UHD-RX",
+          "host": "192.168.3.31",
+          "port": 80,
+          "protocol": "http",
+          "tags": ["video", "av-over-ip", "rx"],
+          "commands": [
+            {
+              "id": "reboot",
+              "label": "Reboot Decoder",
+              "protocol": "http",
+              "url": "http://{host}/reboot"
+            }
+          ]
+        },
+        {
+          "id": "3c-blustream-rx-judge",
+          "name": "Judge Bench Decoder (RX)",
+          "type": "video_decoder",
+          "manufacturer": "Blustream",
+          "model": "IP200UHD-RX",
+          "host": "192.168.3.32",
+          "port": 80,
+          "protocol": "http",
+          "tags": ["video", "av-over-ip", "rx"],
+          "commands": [
+            {
+              "id": "reboot",
+              "label": "Reboot Decoder",
+              "protocol": "http",
+              "url": "http://{host}/reboot"
+            }
+          ]
+        },
+        {
+          "id": "3c-cisco-webex",
+          "name": "Cisco Webex Room Codec",
+          "type": "cisco_webex",
+          "manufacturer": "Cisco",
+          "model": "Room Kit Pro",
+          "host": "10.30.3.5",
+          "port": 443,
+          "protocol": "https",
+          "web_protocol": "https",
+          "web_port": 443,
+          "tags": ["video-conference", "vc"],
+          "commands": [
+            {
+              "id": "dial",
+              "label": "Place Call…",
+              "protocol": "https",
+              "method": "POST",
+              "url": "https://{host}/putxml",
+              "body": "<Command><Dial><Number>{value}</Number></Dial></Command>",
+              "prompt": "Address or number to dial",
+              "auth": {"username": "admin", "password": "changeme"},
+              "verify_tls": false
+            },
+            {
+              "id": "hangup",
+              "label": "Hang Up",
+              "protocol": "https",
+              "method": "POST",
+              "url": "https://{host}/putxml",
+              "body": "<Command><Call><Disconnect/></Call></Command>",
+              "auth": {"username": "admin", "password": "changeme"},
+              "verify_tls": false
+            },
+            {
+              "id": "standby-on",
+              "label": "Standby On",
+              "protocol": "https",
+              "method": "POST",
+              "url": "https://{host}/putxml",
+              "body": "<Command><Standby><Activate/></Standby></Command>",
+              "auth": {"username": "admin", "password": "changeme"},
+              "verify_tls": false
+            },
+            {
+              "id": "standby-off",
+              "label": "Standby Off",
+              "protocol": "https",
+              "method": "POST",
+              "url": "https://{host}/putxml",
+              "body": "<Command><Standby><Deactivate/></Standby></Command>",
+              "auth": {"username": "admin", "password": "changeme"},
+              "verify_tls": false
+            }
+          ]
+        },
+        {
+          "id": "3c-poly-studiox",
+          "name": "Poly Studio X (Alt. VC Unit)",
+          "type": "poly",
+          "manufacturer": "Poly",
+          "model": "Studio X50",
+          "host": "10.30.3.6",
+          "port": 443,
+          "protocol": "https",
+          "web_protocol": "https",
+          "web_port": 443,
+          "tags": ["video-conference", "vc"],
+          "commands": [
+            {
+              "id": "dial",
+              "label": "Place Call…",
+              "protocol": "https",
+              "method": "POST",
+              "url": "https://{host}/rest/conferences",
+              "headers": {"Content-Type": "application/json"},
+              "body": "{\"address\": \"{value}\", \"rate\": 1920, \"dialType\": \"SIP\"}",
+              "prompt": "SIP address to dial",
+              "auth": {"username": "admin", "password": "changeme"},
+              "verify_tls": false
+            }
+          ]
+        }
+      ]
     }
   ]
 }
