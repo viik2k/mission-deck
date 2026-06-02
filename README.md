@@ -8,6 +8,9 @@ room's equipment, check whether devices are online, and **open all of a room's
 web UIs in the browser with one click** (the headline feature of the original
 tool).
 
+<img width="1198" height="789" alt="image" src="https://github.com/user-attachments/assets/dacd7d47-f82c-4533-a8c3-dd924e6bb14b" />
+
+
 > **Security by design:** application logic is strictly decoupled from
 > environment data. No IP addresses or device names live in this repository —
 > they live only in a local, git-ignored `config.json`. The repo ships a
