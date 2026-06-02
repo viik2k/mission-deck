@@ -47,7 +47,9 @@ Each module has one job and strict constraints:
 Site
   └── Room[]
         └── Device (base, dispatched via registry decorator)
-              ├── PTZCamera, ControlProcessor, AudioDSP, Display, ...
+              ├── PTZCamera, ControlProcessor, AudioDSP, Display, DocumentCamera, Recorder
+              ├── VideoMatrix, VideoEncoder (TX), VideoDecoder (RX)  — AV-over-IP (Blustream, Crestron NVX, …)
+              ├── VideoConferenceCodec  — VC codecs (Cisco Webex, Poly, …)
               └── GenericDevice (fallback for unknown types)
 ```
 
@@ -71,7 +73,7 @@ If no config is found, a `WelcomeWindow` is shown. Switching config in Settings 
 
 ### Config-driven device commands
 
-Device `commands` entries in JSON (HTTP GET or raw TCP) require no code changes. Placeholders `{host}`, `{port}`, `{value}` are substituted at runtime. An optional `prompt` key causes the UI to ask the user for `{value}` before sending.
+Device `commands` entries in JSON (HTTP or raw TCP) require no code changes. Placeholders `{host}`, `{port}`, `{value}` are substituted at runtime (in both the URL and the body). An optional `prompt` key causes the UI to ask the user for `{value}` before sending. HTTP commands may set `method` (e.g. `POST`), a `body`, `headers`, `auth` (`{"username","password"}` → Basic auth) and `verify_tls: false` — enough to drive VC codec APIs (Cisco xCommand, Poly REST) over self-signed-cert HTTPS. Codec credentials live in the git-ignored `config.json`, never in `config.example.json`.
 
 ### Widget pooling
 

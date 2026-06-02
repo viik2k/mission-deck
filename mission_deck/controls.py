@@ -25,6 +25,11 @@ Example config (inside a device object):
 Placeholders ``{host}``, ``{port}`` and ``{value}`` are substituted at run time.
 A ``prompt`` makes the UI ask the user for ``{value}`` first.
 
+HTTP commands may also set ``method`` (e.g. ``"POST"``), a ``body`` (placeholders
+substituted too), ``headers``, ``auth`` (``{"username": …, "password": …}``) and
+``verify_tls: false`` — enough to drive VC codec APIs (Cisco xCommand, Poly REST)
+that need an authenticated POST over a self-signed-cert HTTPS endpoint.
+
 The action functions are **blocking** and are executed on a background thread by
 the app, so they never freeze the UI.
 """
@@ -36,7 +41,7 @@ from typing import Callable
 
 from mission_deck.browser import BrowserConfig, open_urls
 from mission_deck.models import Device
-from mission_deck.network import ControlError, http_get, tcp_send
+from mission_deck.network import ControlError, http_request, tcp_send
 
 
 @dataclass(slots=True)
@@ -64,6 +69,23 @@ def _format(template: str, device: Device, value: str | None) -> str:
     )
 
 
+def _parse_auth(raw: object) -> tuple[str, str] | None:
+    """Turn a config ``auth`` value into a ``(username, password)`` pair.
+
+    Accepts ``{"username": …, "password": …}`` (``"user"`` is also honoured) or a
+    two-item ``[username, password]`` list. Anything else yields ``None``.
+    """
+
+    if isinstance(raw, dict):
+        user = raw.get("username", raw.get("user"))
+        password = raw.get("password", raw.get("pass"))
+        if user is not None and password is not None:
+            return (str(user), str(password))
+    elif isinstance(raw, (list, tuple)) and len(raw) == 2:
+        return (str(raw[0]), str(raw[1]))
+    return None
+
+
 def _make_command_control(device: Device, spec: dict) -> DeviceControl | None:
     """Build a DeviceControl from one config ``commands`` entry."""
 
@@ -79,9 +101,23 @@ def _make_command_control(device: Device, spec: dict) -> DeviceControl | None:
         url_tmpl = spec.get("url")
         if not isinstance(url_tmpl, str) or not url_tmpl:
             return None
+        method = str(spec.get("method", "GET"))
+        body_tmpl = spec.get("body") if isinstance(spec.get("body"), str) else None
+        auth = _parse_auth(spec.get("auth"))
+        headers = spec.get("headers") if isinstance(spec.get("headers"), dict) else None
+        verify_tls = bool(spec.get("verify_tls", True))
 
-        def run(value: str | None, _tmpl=url_tmpl) -> str:
-            return http_get(_format(_tmpl, device, value), timeout=float(spec.get("timeout", 5.0)))
+        def run(value: str | None, _tmpl=url_tmpl, _body=body_tmpl) -> str:
+            body = _format(_body, device, value) if _body is not None else None
+            return http_request(
+                _format(_tmpl, device, value),
+                method=method,
+                body=body,
+                timeout=float(spec.get("timeout", 5.0)),
+                auth=auth,
+                headers=headers,
+                verify_tls=verify_tls,
+            )
 
     elif protocol == "tcp":
         payload_tmpl = spec.get("payload")
@@ -121,6 +157,12 @@ def validate_command_spec(spec: dict) -> None:
     if protocol in ("http", "https"):
         if not str(spec.get("url") or "").strip():
             raise ControlError("An HTTP command needs a URL to request.")
+        if "auth" in spec and spec.get("auth") is not None and _parse_auth(spec.get("auth")) is None:
+            raise ControlError(
+                "auth must be {\"username\": …, \"password\": …} or [username, password]."
+            )
+        if "headers" in spec and spec.get("headers") is not None and not isinstance(spec.get("headers"), dict):
+            raise ControlError("headers must be an object of name/value pairs.")
     elif protocol == "tcp":
         payload = spec.get("payload")
         if not isinstance(payload, str) or not payload:
