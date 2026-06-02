@@ -22,12 +22,15 @@ the Tk UI thread.
 
 from __future__ import annotations
 
+import logging
 import shutil
 import subprocess
 import threading
 import webbrowser
 from dataclasses import dataclass
 from typing import Iterable
+
+logger = logging.getLogger(__name__)
 
 # Executable name fragments that accept Chromium's ``--new-window`` flag.
 _CHROMIUM_HINTS = ("chrome", "chromium", "edge", "msedge", "brave", "vivaldi", "opera")
@@ -128,17 +131,24 @@ def _open_blocking(urls: list[str], cfg: BrowserConfig) -> None:
         args.extend(urls)
         try:
             subprocess.Popen(args, close_fds=True)
+            logger.info("Opened %d URL(s) via %s", len(urls), executable)
             return
-        except OSError:
-            pass  # fall through to the webbrowser module
+        except OSError as exc:
+            logger.warning(
+                "Could not launch browser '%s' (%s); falling back to default", executable, exc
+            )
 
     # 2) Fall back to the webbrowser module (OS default or a registered name).
     try:
         browser = webbrowser.get(cfg.name) if cfg.name else webbrowser.get()
-    except webbrowser.Error:
+    except webbrowser.Error as exc:
+        logger.warning(
+            "Browser '%s' not registered (%s); using OS default", cfg.name, exc
+        )
         browser = webbrowser.get()
 
     for index, url in enumerate(urls):
         # First URL hints "new window", the rest open as tabs alongside it.
         new = 1 if (index == 0 and cfg.new_window) else 2
         browser.open(url, new=new, autoraise=(index == 0))
+    logger.info("Opened %d URL(s) via webbrowser module", len(urls))

@@ -39,6 +39,7 @@ Each module has one job and strict constraints:
 | `browser.py` | Open URLs in configured browser | Launches subprocess/webbrowser; no models |
 | `state.py` | Persisted user preferences + recent files | Best-effort JSON; never breaks app if corrupt |
 | `theme.py` | Colour and sizing constants | Pure constants, no logic |
+| `logging_setup.py` | Centralised diagnostic + audit logging | Stdlib only; idempotent; never raises into callers |
 | `app.py` | CustomTkinter UI + event orchestration | ~1300 LOC; marshals network results to UI thread |
 
 ### Data model hierarchy
@@ -86,3 +87,24 @@ Device `commands` entries in JSON (HTTP or raw TCP) require no code changes. Pla
 - Validation errors raised early as typed exceptions (`ConfigError`, `DeviceConfigError`, `ControlError`) with human-readable messages — never raw `Exception`
 - Networking uses `asyncio` + stdlib `socket` only; no third-party HTTP library
 - `config.json` is `.gitignore`d; `config.example.json` contains dummy data only
+
+### Logging & auditing
+
+`logging_setup.setup_logging()` is called once at the top of `main()` and writes two
+rotating streams to `<user_config_dir>/logs/` (override the directory with
+`MISSION_DECK_LOG_DIR`):
+
+- **`mission-deck.log`** — diagnostic. Every module logs via
+  `logging.getLogger(__name__)`. Level defaults to `INFO`; set
+  `MISSION_DECK_LOG_LEVEL=DEBUG` to trace probes/transports.
+- **`audit.log`** — one JSON object per line recording operator actions
+  (`device.command`, `room.open_web_uis`, `status_check.complete`, `config.load`,
+  `config.save`, `config.switch`, `settings.change`, `app.start`/`app.stop`). Emit
+  events with `logging_setup.audit(event, **fields)`; each line carries `ts`, `event`
+  and `user`. The audit logger never propagates to the diagnostic handlers.
+
+Conventions: `models.py`/`theme.py` stay logging-free (purity constraint) — their
+typed exceptions are logged by callers. Uncaught exceptions on the main thread and
+worker threads are captured to the diagnostic log via installed excepthooks, so a
+background crash is never silently lost. Auditing is best-effort and must never raise
+into the caller's control flow.

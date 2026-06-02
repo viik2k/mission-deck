@@ -24,6 +24,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import logging
 import socket
 import ssl
 import time
@@ -33,6 +34,8 @@ from dataclasses import dataclass
 from typing import Any, Callable, Iterable, Mapping, Sequence
 
 from .models import Device, DeviceStatus, RecordingStatus
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -60,9 +63,11 @@ async def check_device(device: Device, timeout: float) -> CheckResult:
         connect = asyncio.open_connection(device.host, port)
         _reader, writer = await asyncio.wait_for(connect, timeout=timeout)
     except asyncio.TimeoutError:
+        logger.debug("Probe %s (%s:%s) timed out after %.1fs", device.id, device.host, port, timeout)
         return CheckResult(device.id, DeviceStatus.OFFLINE, None, "timed out")
     except (OSError, asyncio.CancelledError) as exc:
         # Connection refused, host unreachable, DNS failure, etc.
+        logger.debug("Probe %s (%s:%s) failed: %s", device.id, device.host, port, exc)
         return CheckResult(device.id, DeviceStatus.OFFLINE, None, str(exc) or "unreachable")
 
     latency_ms = (time.perf_counter() - start) * 1000.0
@@ -72,6 +77,7 @@ async def check_device(device: Device, timeout: float) -> CheckResult:
         await writer.wait_closed()
     except OSError:
         pass
+    logger.debug("Probe %s (%s:%s) online in %.0fms", device.id, device.host, port, latency_ms)
     return CheckResult(device.id, DeviceStatus.ONLINE, latency_ms, None)
 
 
@@ -154,15 +160,19 @@ def http_request(
     if not verify_tls:
         context = ssl._create_unverified_context()
 
+    logger.debug("HTTP %s %s (verify_tls=%s)", request.get_method(), url, verify_tls)
     try:
         with urllib.request.urlopen(request, timeout=timeout, context=context) as response:
             status = getattr(response, "status", response.getcode())
+            logger.info("HTTP %s %s -> %s", request.get_method(), url, status)
             return f"HTTP {status} OK"
     except urllib.error.HTTPError as exc:
         # The server answered, just not 2xx — still a "reached it" outcome.
+        logger.info("HTTP %s %s -> %s %s", request.get_method(), url, exc.code, exc.reason)
         return f"HTTP {exc.code} {exc.reason}"
     except (urllib.error.URLError, OSError, ValueError) as exc:
         reason = getattr(exc, "reason", exc)
+        logger.warning("HTTP %s %s failed: %s", request.get_method(), url, reason)
         raise ControlError(f"Request failed: {reason}") from exc
 
 
@@ -183,19 +193,24 @@ def tcp_send(
 
     if not port:
         raise ControlError("No port configured for this command.")
+    logger.debug("TCP send %d bytes to %s:%s (read_response=%s)", len(payload), host, port, read_response)
     try:
         with socket.create_connection((host, port), timeout=timeout) as sock:
             sock.sendall(payload)
             if not read_response:
+                logger.info("TCP sent %d bytes to %s:%s", len(payload), host, port)
                 return f"Sent {len(payload)} bytes to {host}:{port}"
             sock.settimeout(timeout)
             try:
                 data = sock.recv(2048)
             except socket.timeout:
+                logger.info("TCP sent to %s:%s; no reply before timeout", host, port)
                 return "Sent; no response (timed out waiting for reply)"
             text = data.decode("utf-8", errors="replace").strip()
+            logger.info("TCP %s:%s replied %d bytes", host, port, len(data))
             return f"Reply: {text}" if text else "Sent; empty reply"
     except OSError as exc:
+        logger.warning("TCP connection to %s:%s failed: %s", host, port, exc)
         raise ControlError(f"Connection failed: {exc}") from exc
 
 
@@ -222,7 +237,11 @@ def fetch_recording_status(
                 else:
                     return RecordingStatus.UNKNOWN
         return _parse_recording_value(data)
-    except Exception:
+    except (urllib.error.URLError, OSError, socket.timeout) as exc:
+        logger.debug("Recording status fetch from %s failed: %s", url, exc)
+        return RecordingStatus.UNKNOWN
+    except (ValueError, TypeError, KeyError) as exc:
+        logger.debug("Could not parse recording status from %s: %s", url, exc)
         return RecordingStatus.UNKNOWN
 
 
