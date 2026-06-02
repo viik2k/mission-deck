@@ -78,6 +78,31 @@ the [Configuration Reference](Configuration-Reference.md#control-port-vs-web-ui-
 
 ---
 
+## 3a. Adding a new monitor (status-check type)
+
+How a device's reachability is judged is a registry in `network.py`, mirroring
+the device registry. A new check type is **one decorator** — an
+`async (Device, float) -> CheckResult`:
+
+```python
+@register_monitor("ping")          # the config "monitor" value(s) that map here
+async def ping_monitor(device: Device, timeout: float) -> CheckResult:
+    ...
+    return CheckResult(device.id, DeviceStatus.ONLINE, latency_ms, None)
+```
+
+- A device opts in with a `"monitor"` config key; absent that it falls back to
+  `DEFAULT_MONITOR` (`tcp`), so every existing config behaves exactly as before.
+- `check_device()` is the dispatcher — **no caller changes** are needed.
+- Keep it timeout-bounded; if it does blocking I/O (like the `http` monitor's
+  `urllib` call), offload it with `asyncio.to_thread` so concurrent probes in the
+  same sweep keep running.
+- Document the new monitor name in the
+  [Configuration Reference](Configuration-Reference.md#monitors) and add a dummy
+  example to `config.example.json`.
+
+---
+
 ## 4. Adding a config field
 
 1. **Parse + validate** it in the relevant `from_dict` (`Device.from_dict` /
@@ -139,8 +164,15 @@ mechanics.
 ## 7. UI architecture notes (`app.py`, `editors.py`)
 
 - `App(ctk.CTk)` owns the window, the result queue, and all orchestration
-  (sidebar build, room rendering, status checks, settings, config persistence,
-  auto-refresh).
+  (sidebar build, room rendering, status checks, the estate-wide sweep, settings,
+  config persistence, auto-refresh).
+- **Two top-level views:** the per-room device panel and the `DashboardView`
+  Overview (`dashboard.py`) are swapped in the same grid cell via
+  `show_room_view()` / `show_dashboard()`. `DashboardView` is **pure
+  presentation** — it reads the live `Site` + `HistoryStore` and calls back into
+  `App`; it must never touch the network or a worker thread. Its list panels
+  destroy-and-rebuild but are guarded by content signatures and `MAX_LIST_ROWS`,
+  so preserve those when editing it.
 - **Widget pooling:** `DeviceCard` and `RoomButton` are pooled and rebound
   (`set_device()` / rebind) rather than recreated; `CityGroup` builds its room
   buttons lazily on first expand. This is the key to staying snappy at 100+

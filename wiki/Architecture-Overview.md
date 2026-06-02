@@ -38,14 +38,16 @@ mission_deck/
 ├── __main__.py        # `python -m mission_deck` → app.main()
 ├── config.py          # locate / load / structurally validate JSON
 ├── models.py          # Site → Room → Device typed models + registry
-├── network.py         # async status probes + HTTP/TCP control transports
+├── network.py         # async status probes (monitor registry) + HTTP/TCP control transports
 ├── controls.py        # build per-device control action lists
 ├── browser.py         # open URLs in the configured browser
+├── history.py         # persisted uptime-history store (SQLite)
+├── dashboard.py       # estate-wide Overview view (KPIs / uptime / activity)
 ├── state.py           # persisted per-user preferences + recent files
 ├── theme.py           # colour palette + sizing tokens
 ├── logging_setup.py   # diagnostic + audit logging
 ├── editors.py         # in-app room/device/command editor dialogs
-└── app.py             # CustomTkinter UI + event orchestration (~1900 LOC)
+└── app.py             # CustomTkinter UI + event orchestration (~2200 LOC)
 ```
 
 ### Responsibilities and constraints
@@ -54,9 +56,11 @@ mission_deck/
 |--------|-----|----------|
 | `config.py` | Find a config file, parse JSON, validate top-level shape; atomic save. | Touch the GUI or device internals. |
 | `models.py` | Turn raw config into typed `Site`/`Room`/`Device` objects; device registry. | Do I/O, GUI, or networking. Stays logging-free (purity). |
-| `network.py` | Async TCP reachability probes; blocking HTTP/TCP control transports; recording-status fetch. | Touch the GUI. Must be thread-safe; results via callback. |
+| `network.py` | Async reachability probes via a pluggable **monitor registry** (`tcp`/`http`/`https`), bounded by a concurrency semaphore; blocking HTTP/TCP control transports; recording-status fetch. | Touch the GUI. Must be thread-safe; results via callback. |
 | `controls.py` | Build `DeviceControl` action lists from config `commands` + built-in "Open Web UI". | Do the actual I/O itself (delegates to `network.py`). |
 | `browser.py` | Launch URLs via subprocess/`webbrowser`. | Import models or touch the GUI. |
+| `history.py` | Best-effort SQLite store of reachability samples; per-device/per-room uptime queries. | Anything beyond stdlib `sqlite3`; raising into callers. |
+| `dashboard.py` | Render the estate-wide Overview from live `Site` + `HistoryStore`. | Networking; touching worker threads. Presentation only, UI thread. |
 | `state.py` | Load/save per-user `state.json` (best-effort). | Break the app if the file is missing/corrupt. |
 | `theme.py` | Pure colour/size constants. | Contain logic. Stays logging-free. |
 | `logging_setup.py` | Configure diagnostic + audit logging; install excepthooks. | Use anything beyond stdlib; raise into callers. |
@@ -69,6 +73,8 @@ The dependency direction is roughly:
 app.py ── editors.py
   │  ├── controls.py ── network.py ── models.py ── config.py
   │  ├── browser.py
+  │  ├── history.py ────────────────── models.py ── config.py
+  │  ├── dashboard.py ── history.py + models.py + logging_setup.py
   │  ├── state.py ──────────────────────────────── config.py
   │  ├── theme.py ── models.py
   │  └── logging_setup.py ───────────────────────── config.py
@@ -143,22 +149,63 @@ Tkinter is single-threaded; the UI must only ever be touched from the Tk
 - **UI thread** — runs Tk exclusively. All widget creation and mutation happens
   here.
 - **Status-check worker** — `network.run_status_checks()` runs on a daemon
-  thread. It spins up its own `asyncio` event loop, probes all of a room's
-  devices **concurrently**, and publishes each `CheckResult` to a thread-safe
-  queue as it completes.
+  thread. It spins up its own `asyncio` event loop, probes devices
+  **concurrently** through each device's registered monitor, and publishes each
+  `CheckResult` to a thread-safe queue as it completes. Concurrency is **bounded**
+  by an `asyncio.Semaphore` (default `network.DEFAULT_MAX_CONCURRENCY = 128`,
+  tunable via `max_concurrent_checks`) so an estate-wide sweep of thousands of
+  devices never opens thousands of sockets at once. The same driver powers both
+  the per-room check and the estate-wide sweep (separate queues/generations).
 - **Control worker** — device commands (HTTP/TCP) and recording polls run on a
   daemon thread via `app.run_background(work, on_done)`.
+- **History writes** — each completed check/sweep appends a batch of
+  `history.Sample`s, persisted off the UI thread via `run_background` (SQLite,
+  best-effort).
 - **Result marshalling** — `app.after(...)` polls the result queue on the Tk
-  timer and applies updates on the UI thread, so cards flip green/red live
-  without ever blocking the interface.
+  timer and applies updates **in a batch, once per tick** (not per device), so
+  cards flip green/red live without ever blocking the interface.
 
 A **generation counter** guards stale results: when you switch rooms or start a
 new check, results from an older check are discarded rather than scribbled onto
-the wrong room.
+the wrong room. The estate sweep uses its own queue + generation counter.
 
 > Rule of thumb when editing: anything that does network or file I/O belongs off
 > the Tk thread; anything that touches a widget must be back on it (via
 > `after`). See [Networking & Device Control](Networking-and-Device-Control.md).
+
+---
+
+## The Overview dashboard & estate-wide sweep
+
+The **Overview** (`dashboard.py`) is a second top-level view, swapped with the
+room panel in the same grid cell (`App.show_dashboard()` / `show_room_view()`;
+sidebar "⌂ Overview" button). It renders a KPI bar, an attention list (offline
+devices), a recorders panel, a per-room uptime panel, and a recent-activity feed
+(`logging_setup.tail_audit`). It is **pure presentation**: it reads live `Site`
+state plus the `HistoryStore` and calls back into `App` (refresh, toggle polling,
+jump to a room); it never touches the network itself. The destroy-and-rebuild
+list panels are guarded by **content signatures** and capped at `MAX_LIST_ROWS`,
+so a refresh whose data hasn't changed (or an estate with hundreds of offline
+devices) doesn't rebuild thousands of widgets.
+
+`App.run_estate_sweep()` probes **all** rooms (`site.all_devices()`) using the
+same worker/queue/`after()` pattern as a room check but on its own queue +
+generation counter. A background timer
+(`dashboard_poll_enabled`/`dashboard_poll_seconds` in `AppState`) can re-run the
+sweep on an interval. Whether the app opens on the Overview or a room is the
+`start_on_dashboard` preference.
+
+## Uptime history
+
+`history.HistoryStore` is a best-effort SQLite store at
+`<user_config_dir>/history.db` (override with `MISSION_DECK_HISTORY_DB`). One
+shared connection (`check_same_thread=False` + a lock, WAL mode) serves Tk-thread
+reads and worker-thread writes. Each completed check/sweep appends a batch of
+`Sample`s; only resolved (ONLINE/OFFLINE) samples are stored. `uptime` /
+`room_uptime` / `rooms_uptime` return `None` when a window has no data (so the UI
+shows "—", not a false 0%). Samples older than `history_retention_days` are
+pruned on open. Like `state.py` and the audit log, it **never raises into
+callers**.
 
 ---
 
@@ -196,7 +243,8 @@ Key widget classes:
 
 | Class | Role |
 |-------|------|
-| `App(ctk.CTk)` | The main window; owns the sidebar, main panel, status bar, the result queue, and all orchestration. |
+| `App(ctk.CTk)` | The main window; owns the sidebar, the swappable room/Overview panel, status bar, the result queue, and all orchestration. |
+| `DashboardView` | The estate-wide **Overview** (`dashboard.py`): KPI bar, attention/recorders/uptime/activity panels. Built once, repainted by `refresh()`. |
 | `RoomButton` | A sidebar room entry with a health dot. **Pooled** and rebound. |
 | `CityGroup` | A collapsible city box; builds its room buttons **lazily** on first expand. |
 | `DeviceCard` | A device tile (name, description, address, status). **Pooled** and rebound via `set_device()`. |
@@ -221,6 +269,9 @@ performance target the project explicitly designs for.
 | The config schema or validation | `config.py` (structure) + `models.py` (content) |
 | A device type or its category | `models.py` (`@register_device`) |
 | How status checks probe devices | `network.py` |
+| A new reachability check type | `network.py` (`@register_monitor`) |
+| The Overview / estate-wide health | `dashboard.py` + `app.run_estate_sweep` |
+| Uptime history / storage | `history.py` |
 | How a control command is built/run | `controls.py` + `network.py` |
 | How web UIs open | `browser.py` |
 | Colours / sizing | `theme.py` |

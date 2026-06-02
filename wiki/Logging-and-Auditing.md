@@ -97,10 +97,11 @@ operator actions. One JSON object per line. Every record carries:
 | `config.load` | A config is loaded (success or failure) | `path`, `demo`, `rooms`, `ok`, `error` |
 | `config.save` | A config is written from the editors | `path`, `ok`, `rooms`, `error` |
 | `config.switch` | Operator switches config | `frm`, `to` |
-| `settings.change` | Settings dialog saved | `ping_timeout_seconds`, `auto_refresh_seconds`, `browser_path`, `browser_new_window` |
+| `settings.change` | Settings dialog saved | `ping_timeout_seconds`, `auto_refresh_seconds`, `browser_path`, `browser_new_window`, `start_on_dashboard`, `dashboard_poll_enabled`, `dashboard_poll_seconds` |
 | `device.command` | A control command is issued | `device_id`, `device_name`, `device_type`, `host`, `control`, (outcome) |
 | `room.open_web_uis` | Open Web UIs invoked | `room_id`, `room_name`, `count`, `browser` |
 | `status_check.complete` | A room status check finishes | `room_id`, `room_name`, `devices`, `online`, `offline` |
+| `status_check.estate` | An estate-wide sweep finishes | `devices`, `online`, `offline` |
 
 ### Emitting audit events (developers)
 

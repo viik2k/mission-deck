@@ -15,7 +15,9 @@ surface small.
 
 ### The question being answered
 
-A status check answers exactly one question per device:
+A status check answers one question per device — *is it reachable right now?* —
+but **how** that's judged is pluggable (see [the monitor registry](#11-the-monitor-registry)).
+The default `tcp` monitor asks:
 
 > *Can I open a TCP connection to this device's configured port right now?*
 
@@ -26,23 +28,50 @@ A status check answers exactly one question per device:
 - **No port configured** (e.g. a raw-`tcp` device with `port: 0`) → **UNKNOWN**
   (`"no port configured to check"`).
 
-This is a deliberately lightweight, protocol-agnostic probe. It does *not* speak
-HTTP, log in, or verify the application is healthy — only that something is
-listening. That's enough for an at-a-glance "is it on the network?" dashboard
-and keeps checks fast and side-effect-free.
+This is a deliberately lightweight, protocol-agnostic probe. It does *not* log
+in or verify the application is healthy — only that something is listening.
+That's enough for an at-a-glance "is it on the network?" dashboard and keeps
+checks fast and side-effect-free.
+
+### 1.1 The monitor registry
+
+`network.py` holds a `_MONITOR_REGISTRY` and a `@register_monitor("name")`
+decorator that mirrors `@register_device` in `models.py`. A *monitor* is an
+`async (Device, float) -> CheckResult`. Built-ins:
+
+| Monitor | Behaviour |
+|---------|-----------|
+| `tcp` *(default)* | Open a TCP connection to `host:port` — the historical default for every config. |
+| `http` / `https` | Issue an HTTP(S) request; **any answered endpoint** (even a 4xx/5xx) counts as up. The URL comes from a `health_url` config key, else the device's `web_url`. Honours `verify_tls: false`. Falls back to `tcp` if no URL resolves. |
+
+`check_device()` is just a dispatcher: a device opts into a monitor with a
+`"monitor"` config key (`monitor_name_for`), otherwise it falls back to
+`DEFAULT_MONITOR` (`tcp`). **Adding a new check type is a single decorator** — no
+caller changes. `registered_monitors()` exposes a read-only view for tests/UI.
 
 ### How it runs (`network.py`)
 
-- `check_device(device, timeout)` — async; does one
-  `asyncio.open_connection(host, port)` wrapped in `asyncio.wait_for(timeout)`,
-  measures latency with `time.perf_counter()`, then closes the connection
-  cleanly. Returns a `CheckResult(device_id, status, latency_ms, error)`.
-- `_check_all(...)` — `asyncio.gather`s a probe per device so **all run
-  concurrently**, calling a `publish` callback as each finishes.
-- `run_status_checks(devices, timeout, publish)` — a **blocking** driver meant
-  for a worker thread. It creates a fresh event loop (it's never on the main
-  thread, so there's no running loop to clash with), runs `_check_all`, and
-  closes the loop.
+- `check_device(device, timeout)` — async; looks up the device's monitor and
+  awaits it. Returns a `CheckResult(device_id, status, latency_ms, error)`.
+- `_check_all(...)` — `asyncio.gather`s a probe per device so they run
+  **concurrently**, but **bounded** by an `asyncio.Semaphore`; each probe holds a
+  slot only for the probe itself, then `publish`es as it finishes (so results
+  still stream live).
+- `run_status_checks(devices, timeout, publish, concurrency=128)` — a
+  **blocking** driver meant for a worker thread. It creates a fresh event loop
+  (it's never on the main thread, so there's no running loop to clash with),
+  sizes the default executor to `concurrency` (the `http` monitor offloads its
+  blocking `urllib` call via `asyncio.to_thread`), runs `_check_all`, and closes
+  the loop.
+
+### Bounded concurrency
+
+`DEFAULT_MAX_CONCURRENCY = 128`. An estate-wide sweep can span thousands of
+devices; firing them all at once would exhaust file descriptors and flood the
+network with a SYN burst. The semaphore caps in-flight probes so a sweep of any
+size runs as a steady, bounded stream. It's tunable per deployment via the
+`max_concurrent_checks` app/config setting (a per-user Settings value wins),
+resolved by `App._effective_concurrency()`.
 
 ### How the UI drives it
 
@@ -62,6 +91,23 @@ and keeps checks fast and side-effect-free.
 
 The timeout comes from the **effective timeout**: the per-user Settings override
 if set, otherwise `app.ping_timeout_seconds` from the config (default `2.0`).
+
+### The estate-wide sweep
+
+`app.run_estate_sweep()` probes **every** device in **every** room
+(`site.all_devices()`) using the same `run_status_checks` driver, but on its own
+queue and generation counter so it can't collide with a per-room check. It backs
+the Overview's "Refresh All" button and the optional background poll
+(`dashboard_poll_enabled` / `dashboard_poll_seconds`). Each completed sweep emits
+a `status_check.estate` audit event with the online/offline tally.
+
+### Uptime history
+
+Each completed check or sweep appends a batch of `history.Sample`s to the
+best-effort SQLite `HistoryStore` (off the UI thread via `run_background`). Only
+resolved ONLINE/OFFLINE samples are stored; the Overview reads them back as
+per-room uptime percentages. See
+[Architecture Overview → Uptime history](Architecture-Overview.md#uptime-history).
 
 ---
 
@@ -248,8 +294,9 @@ slashes/`.exe`) or an object (`path`/`name`/`new_window`).
 
 ## 7. Security notes for this layer
 
-- **Probes are connect-and-close** — no data is sent during a status check, so a
-  check can't accidentally trigger device behaviour.
+- **Probes are read-only** — the default `tcp` monitor connects and closes
+  (sends nothing); the `http`/`https` monitor issues a single GET. Neither
+  changes device state.
 - **`verify_tls: false` is opt-in per command** and exists specifically for
   self-signed LAN certs; prefer leaving TLS verification on where the device
   supports a valid cert.

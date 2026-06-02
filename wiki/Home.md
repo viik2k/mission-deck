@@ -5,9 +5,10 @@ administrators, and developers of the courtroom AV management dashboard.
 
 > **mission-deck** is a Python/CustomTkinter desktop application that gives AV
 > technicians a single dark-mode dashboard to browse every courtroom's
-> equipment, check whether devices are online, open every device's web UI in
-> one click, and issue vendor-neutral control commands — all driven by an
-> external, git-ignored `config.json`.
+> equipment, check whether devices are online, watch estate-wide health and
+> uptime at a glance, open every device's web UI in one click, and issue
+> vendor-neutral control commands — all driven by an external, git-ignored
+> `config.json`.
 
 ---
 
@@ -26,9 +27,9 @@ mission-deck serves three audiences, and this wiki is organised around them:
 ## Article index
 
 ### For operators
-- **[User Guide](User-Guide.md)** — launching the app, the welcome screen,
-  navigating cities/rooms/devices, checking status, opening web UIs, issuing
-  device commands, recording controls, and the Settings dialog.
+- **[User Guide](User-Guide.md)** — launching the app, the welcome screen, the
+  estate **Overview**, navigating cities/rooms/devices, checking status, opening
+  web UIs, issuing device commands, recording controls, and the Settings dialog.
 
 ### For administrators
 - **[Installation & Setup](Installation-and-Setup.md)** — running from source,
@@ -46,7 +47,8 @@ mission-deck serves three audiences, and this wiki is organised around them:
 - **[Architecture Overview](Architecture-Overview.md)** — module boundaries,
   the data-model hierarchy, the threading model, and config discovery.
 - **[Networking & Device Control](Networking-and-Device-Control.md)** — how
-  status checks, control transports, and recording polling actually work.
+  status checks (the pluggable monitor registry, bounded concurrency, the
+  estate-wide sweep), control transports, and recording polling actually work.
 - **[Developer Guide](Developer-Guide.md)** — code conventions, adding a device
   type, adding a config field, the UI architecture, and widget pooling.
 
@@ -64,10 +66,11 @@ mission-deck serves three audiences, and this wiki is organised around them:
 |----------|-------|
 | Language | Python 3.11+ |
 | UI toolkit | CustomTkinter (dark mode) |
-| Runtime dependencies | `customtkinter`, `pillow` (networking uses stdlib only) |
+| Runtime dependencies | `customtkinter`, `pillow` (networking + history use stdlib only) |
 | Packaging | PyInstaller → single windowed `.exe` |
 | Config format | External `config.json`, `schema_version: 1` |
 | Config location | git-ignored; repo ships `config.example.json` (dummy data only) |
+| Uptime history | Best-effort SQLite `history.db` in the per-user dir |
 | Test suite | None yet — manual verification against `config.example.json` |
 | Current version | `0.1.0` (see `mission_deck/__init__.py`) |
 

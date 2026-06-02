@@ -44,14 +44,22 @@ Each module has a single, well-defined job. Please keep these boundaries:
 | Module | Responsibility | Keep out |
 |--------|----------------|----------|
 | `config.py` | Find, load, **structurally** validate the JSON | Device internals, GUI |
-| `models.py` | Typed `Site` / `Room` / `Device` + device registry | File I/O, GUI, networking |
+| `models.py` | Typed `Site` / `Room` / `Device` + device registry | File I/O, GUI, networking, logging |
+| `network.py` | Async status probes (monitor registry) + HTTP/TCP control transports | GUI; must be thread-safe |
+| `controls.py` | Build per-device control action lists from config `commands` | Doing the I/O itself (delegates to `network.py`) |
 | `browser.py` | Open web UIs in the configured browser | GUI, models |
-| `theme.py` | Colours + sizing tokens | Logic |
-| `app.py` | CustomTkinter UI and event handling | Business rules that belong in models |
+| `history.py` | Persisted uptime-history store (SQLite, best-effort) | Anything beyond stdlib `sqlite3`; raising into callers |
+| `dashboard.py` | Estate-wide Overview view (presentation only) | Networking; touching the network/worker threads |
+| `state.py` | Persisted per-user preferences + recent files | Breaking the app if the file is corrupt |
+| `theme.py` | Colours + sizing tokens | Logic, logging |
+| `logging_setup.py` | Diagnostic + audit logging; excepthooks | Anything beyond stdlib; raising into callers |
+| `editors.py` | In-app room/device/command editor dialogs | Bypassing `models`/`config` validation |
+| `app.py` | CustomTkinter UI and event orchestration | Business rules that belong in models |
 
 Network/status-check logic lives in `network.py` (the async checker) and must
-run **off** the Tk UI thread, marshalling results back via the app's
-`set_device_status` / `set_room_status` hooks.
+run **off** the Tk UI thread, marshalling results back to the Tk thread via a
+thread-safe queue drained by `app.after(...)`. The same worker/queue pattern
+drives both the per-room check and the estate-wide sweep (`run_estate_sweep`).
 
 ## Code style
 
@@ -73,15 +81,30 @@ Device classes are registered, so adding one is a few lines in `models.py`:
 @dataclass(slots=True)
 class Projector(Device):
     category: str = "Projector"            # the sidebar/card grouping label
-
-    async def send_command(self, command: str, **kwargs):
-        # Speak the device's real protocol here (HTTP/CGI, TCP, …).
-        ...
 ```
 
-That's it — the UI groups it automatically, and unknown types still fall back
-to `GenericDevice`. If the type has a web UI, make sure `protocol`/`web_*`
-fields resolve a `web_url` (see the README's config schema).
+That's it — the UI groups it automatically by `category`, and unknown types
+still fall back to `GenericDevice`. Most control is handled generically by the
+**config-driven command system** (`controls.py` + the device's `commands`
+entries), so prefer config over bespoke per-class code; the base
+`Device.send_command` is just a placeholder hook. If the type has a web UI, make
+sure `protocol`/`web_*` fields resolve a `web_url` (see the README's config
+schema).
+
+## How to add a new monitor (status-check type)
+
+How a device's reachability is judged is itself a registry in `network.py`. Add
+a check type with a single decorator — an `async (Device, float) -> CheckResult`:
+
+```python
+@register_monitor("ping")          # the config "monitor" value that maps here
+async def ping_monitor(device, timeout):
+    ...
+    return CheckResult(device.id, DeviceStatus.ONLINE, latency_ms, None)
+```
+
+A device opts in with a `"monitor"` config key; otherwise it falls back to the
+default `tcp` monitor. No caller changes are needed.
 
 ## How to add a config field
 

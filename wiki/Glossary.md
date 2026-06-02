@@ -14,6 +14,12 @@ The append-only, JSON-per-line record of operator actions (`audit.log`). One
 line per event with `ts`, `event`, `user`, and event-specific fields. See
 [Logging & Auditing](Logging-and-Auditing.md).
 
+### Bounded concurrency
+A cap (`DEFAULT_MAX_CONCURRENCY = 128`, tunable via `max_concurrent_checks`) on
+how many status probes run at once, enforced by an `asyncio.Semaphore`. Lets an
+estate-wide sweep of thousands of devices run as a steady stream rather than
+opening thousands of sockets at once.
+
 ### City box / City group
 A collapsible grouping of rooms in the sidebar, keyed by a room's `city` field.
 Keeps large multi-site estates navigable. Rendered by the `CityGroup` widget.
@@ -40,6 +46,12 @@ The reachability state shown by a card's indicator: `UNKNOWN` (grey),
 The human-readable support/debug log (`mission-deck.log`). Distinct from the
 audit log. See [Logging & Auditing](Logging-and-Auditing.md).
 
+### Estate sweep
+A status check that probes **every device in every room** at once
+(`App.run_estate_sweep`), powering the Overview's "Refresh All" and its optional
+background poll. Uses its own queue + generation counter, separate from a
+per-room check. Emits a `status_check.estate` audit event.
+
 ### DSP (Audio DSP)
 Digital Signal Processor — the audio mixing/routing appliance in a room (e.g.
 Biamp Tesira, QSC Core). Device type `audio_dsp` (alias `dsp`).
@@ -53,6 +65,27 @@ recorder URLs, …) survive a load → edit → save round-trip.
 A monotonically increasing stamp on each status-check run. Results whose
 generation doesn't match the current run/room are discarded, preventing stale
 probes from updating the wrong cards.
+
+### HistoryStore / Uptime history
+The best-effort SQLite store (`history.py`, `history.db`) of device reachability
+samples over time. One `Sample` per resolved device is appended after each
+check/sweep; it answers per-device and per-room **uptime percentage** queries
+that the Overview's uptime panel renders. Never raises into callers; override the
+DB path with `MISSION_DECK_HISTORY_DB`.
+
+### Monitor / Monitor registry
+A *monitor* decides how a device's reachability is judged — an
+`async (Device, float) -> CheckResult`. `network.py` holds a registry
+(`@register_monitor`, mirroring `@register_device`): `tcp` (default, TCP connect)
+and `http`/`https` (any answered endpoint = up). A device opts in with a
+`"monitor"` config key. Adding a check type is one decorator.
+
+### Overview / Dashboard
+The estate-wide homepage (`dashboard.py`, `DashboardView`): KPI tiles, a
+needs-attention list, an estate recorders panel, per-room 24h uptime, and a
+recent-activity feed. Pure presentation — it reads live `Site` state + the
+`HistoryStore` and never touches the network itself. Reached via the sidebar
+"⌂ Overview" button.
 
 ### Open Web UIs
 The headline feature: open the management web page of every web-accessible

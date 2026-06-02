@@ -69,13 +69,15 @@ Optional global knobs:
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `ping_timeout_seconds` | number | `2.0` | Seconds to wait for a device's TCP connect during a status check before marking it offline. |
+| `ping_timeout_seconds` | number | `2.0` | Seconds to wait for a device probe during a status check before marking it offline. |
+| `max_concurrent_checks` | integer | `0` (→ built-in `128`) | Cap on how many status probes run at once. Bounds an estate-wide sweep so it never opens thousands of sockets at once. A per-user Settings value overrides this. |
 | `default_appearance` | string | — | Preferred theme hint (`"dark"`, `"light"`, `"system"`). |
 | `browser` | string or object | — | How **Open Web UIs** launches the browser (see [Browser configuration](#browser-configuration)). |
 
 ```jsonc
 "app": {
   "ping_timeout_seconds": 2.0,
+  "max_concurrent_checks": 128,
   "default_appearance": "dark",
   "browser": { "path": "", "name": "", "new_window": true }
 }
@@ -134,6 +136,8 @@ All four must be non-empty strings, or the device is rejected with a
 | `web_protocol` | string | — | `http`/`https` for the web UI when it differs from the control protocol. |
 | `web_port` | integer | — | Web-UI port when it differs from the control port. |
 | `web_path` | string | — | Path appended to the web-UI URL (e.g. `/admin`). |
+| `monitor` | string | `tcp` | How reachability is judged — `tcp`, `http`, or `https` (see [Monitors](#monitors)). |
+| `health_url` | string | — | URL the `http`/`https` monitor probes (else the device's `web_url`). |
 | `commands` | array | — | Control action buttons (see [Control commands](#control-commands)). |
 
 Any **unknown keys** are preserved in the device's `extra` map for
@@ -196,6 +200,31 @@ fall back to **Generic Device** so an unrecognised type never breaks loading.
 
 Adding a new type is a one-line code change — see the
 [Developer Guide](Developer-Guide.md#adding-a-new-device-type).
+
+---
+
+## Monitors
+
+How a device's reachability is judged is **pluggable**. A device picks a monitor
+with the `"monitor"` key; absent it, the default `tcp` monitor is used (so every
+existing config behaves unchanged).
+
+| `monitor` | What it does |
+|-----------|--------------|
+| `tcp` *(default)* | Opens a TCP connection to `host:port`. Online = the port accepts a connection. |
+| `http` / `https` | Issues an HTTP(S) request; **any answered endpoint** (even a 4xx/5xx) is treated as up — only a transport failure is offline. The URL is taken from `health_url`, else the device's resolved `web_url`; it falls back to a `tcp` probe if neither resolves. Honours `verify_tls: false` for self-signed-cert appliances. |
+
+```jsonc
+{
+  "id": "1a-recorder", "name": "Digital Court Recorder", "type": "recorder",
+  "host": "10.10.1.50", "protocol": "https", "web_path": "/admin",
+  "monitor": "https",
+  "health_url": "https://10.10.1.50/api/health"   // optional; else web_url is probed
+}
+```
+
+Adding a new monitor type is a one-decorator code change — see the
+[Developer Guide](Developer-Guide.md#3a-adding-a-new-monitor-status-check-type).
 
 ---
 
@@ -348,11 +377,16 @@ the app — it falls back to defaults, and only known keys are accepted.
 | `last_config_path` | `null` | The config to re-open on next launch. |
 | `recent_configs` | `[]` | Move-to-front list (max 8) for the welcome screen's "Recent". |
 | `ping_timeout_seconds` | `null` | Override for the status-check timeout. |
+| `max_concurrent_checks` | `0` | Override for the simultaneous-probe cap (`0` = use config/built-in default). |
 | `auto_refresh_enabled` | `false` | Auto-refresh on/off. |
 | `auto_refresh_seconds` | `60` | Auto-refresh interval. |
 | `browser_path` | `""` | Browser override from Settings. |
 | `browser_new_window` | `true` | New-window preference. |
 | `appearance` | `"dark"` | `dark` / `light` / `system`. |
+| `start_on_dashboard` | `true` | Open on the Overview instead of a room. |
+| `dashboard_poll_enabled` | `false` | Background estate-wide status sweeps on/off. |
+| `dashboard_poll_seconds` | `120` | Interval between background sweeps. |
+| `history_retention_days` | `30` | Prune uptime-history samples older than this. |
 
 Values set in the **Settings** dialog write here and take precedence over the
 `app` block in the config file. This is why a read-only EXE install still lets

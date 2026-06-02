@@ -25,7 +25,8 @@ mission-deck looks for a configuration file in several standard locations (see
 [Config discovery](Configuration-Reference.md#config-discovery-order)). What you
 see next depends on whether one is found:
 
-- **A config is found** → the dashboard opens straight to it.
+- **A config is found** → the app opens straight to it (on the **Overview** by
+  default — see [§2a](#2a-the-overview-estate-wide-health)).
 - **You opened a config before** → the app re-opens that same file
   automatically. You don't have to pick it again.
 - **Nothing is found and you've never chosen one** → the **Welcome screen**
@@ -54,7 +55,7 @@ The main window has three regions:
 ```
 ┌───────────────┬───────────────────────────────────────────┐
 │  SIDEBAR      │  HEADER (room name, Check Status, Open Web) │
-│               ├───────────────────────────────────────────┤
+│  ⌂ Overview   ├───────────────────────────────────────────┤
 │  search box   │                                             │
 │               │   DEVICE CARDS, grouped by category         │
 │  ▸ Melbourne  │   ┌───────────┐ ┌───────────┐ ┌──────────┐ │
@@ -67,8 +68,9 @@ The main window has three regions:
 └───────────────┴───────────────────────────────────────────┘
 ```
 
-- **Sidebar (left):** a search box and the list of rooms, grouped into
-  collapsible **city boxes** (e.g. Melbourne, Sydney, Brisbane).
+- **Sidebar (left):** a **⌂ Overview** button, a search box, and the list of
+  rooms, grouped into collapsible **city boxes** (e.g. Melbourne, Sydney,
+  Brisbane).
 - **Main panel (right):** the selected room's devices, shown as **cards**
   grouped by category (Control Processors, PTZ Cameras, Audio DSPs, Displays,
   Document Cameras, Recorders, Video Matrix, Video Encoders/Decoders, Video
@@ -77,6 +79,42 @@ The main window has three regions:
   actions.
 - **Status bar (bottom):** which config file is loaded and a one-line summary of
   your most recent action.
+
+Click **⌂ Overview** at the top of the sidebar at any time to switch to the
+estate-wide overview; click any room to switch back to the room view.
+
+---
+
+## 2a. The Overview (estate-wide health)
+
+The **Overview** answers "how is the *whole* estate right now?" without clicking
+through every room. By default the app opens here (you can change that in
+Settings). It shows:
+
+- **KPI tiles** — total rooms, total devices, how many are **online** /
+  **offline**, and how many rooms are fully **healthy**.
+- **Needs attention** — every device currently **offline**, with its room and
+  address. Click a row to jump straight into that room.
+- **Recorders** — the recording state (Idle / Recording / Paused) of every
+  recorder across the estate — handy during hearings.
+- **Uptime · last 24h** — each room's reachability percentage over the last 24
+  hours, worst first, drawn as a small bar. This is built from saved history, so
+  it reflects trends, not just the latest check.
+- **Recent activity** — the tail of the audit log: who did what, most recent
+  first.
+
+### Refreshing the Overview
+
+- **Refresh All** sweeps **every device in every room** at once (bounded so it
+  stays gentle on the network) and updates every panel live. The button shows
+  "Sweeping…" while it runs, and a "last sweep HH:MM:SS" stamp when done.
+- The **Auto** switch turns on a background sweep that re-runs on an interval, so
+  a wall display stays current hands-free.
+- The Overview also has its own **⚙ settings** gear and shows the signed-in
+  operator name (the account every action is audited under).
+
+> Uptime needs data: a room shows "—" until at least one sweep/check has recorded
+> a sample for it.
 
 ---
 
@@ -149,10 +187,11 @@ The **room health dot** in the sidebar aggregates these: green if every device
 is online, red if every device is offline, amber if it's a mix or a check is
 running, and grey if nothing has been checked.
 
-> **What "online" really means:** a green dot means mission-deck could open a
-> TCP connection to the device's configured port. It does **not** guarantee the
-> device's application is fully healthy — just that something is listening on
-> that port. See
+> **What "online" really means:** for most devices a green dot means mission-deck
+> could open a TCP connection to the device's configured port — not that the
+> device's application is fully healthy, just that something is listening.
+> (Devices configured with an `http`/`https` *monitor* instead count as online
+> when their web endpoint answers.) See
 > [Networking & Device Control](Networking-and-Device-Control.md) for detail.
 
 ### Auto-refresh
@@ -239,7 +278,9 @@ persists across launches — you never edit JSON for these.
 |---------|------------------|
 | **Appearance** | Dark / Light / System theme. |
 | **Status-check timeout** | How many seconds to wait for a device before marking it offline. Lower = faster checks but more false "offline"s on a slow network. |
-| **Auto-refresh** | Enable/disable automatic re-checking and set the interval (seconds). |
+| **Auto-refresh** | Enable/disable automatic re-checking of the current room and set the interval (seconds). |
+| **Open on Overview** | Whether the app starts on the estate Overview (on) or the last/first room (off). |
+| **Background sweep** | Enable/disable the Overview's automatic estate-wide sweep and set its interval (seconds). |
 | **Browser** | The browser used by **Open Web UIs**. Use the **Browse** button to point at a browser executable, or leave blank for the OS default. |
 | **Switch config** | Open a different `config.json`. This triggers a quick **soft-restart** so the new file loads cleanly. |
 

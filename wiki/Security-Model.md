@@ -115,6 +115,7 @@ Audited events:
 | `device.command` | device id/name/type, host, control label, (and outcome) |
 | `room.open_web_uis` | room id/name, URL count, browser used |
 | `status_check.complete` | room id/name, device/online/offline counts |
+| `status_check.estate` | device/online/offline counts for an estate-wide sweep |
 
 Every line carries an ISO-8601 UTC timestamp (`ts`), the dotted event name, and
 the OS `user` who performed it. The audit logger **never propagates** to the
@@ -145,9 +146,10 @@ rotation.
 
 mission-deck is intentionally conservative on the wire:
 
-- **Status checks are connect-and-close.** A probe opens a TCP connection and
-  immediately closes it — **no payload is sent**, so a check cannot accidentally
-  trigger device behaviour or change state.
+- **Status checks are read-only and side-effect-free.** The default `tcp` monitor
+  opens a TCP connection and immediately closes it — **no payload is sent**. The
+  optional `http`/`https` monitor issues a single GET to a health/web URL and
+  reads the response; neither changes device state.
 - **Control commands do exactly what config says** — a specific HTTP request or
   TCP payload to a specific device. There is no broadcast, scan, or discovery.
 - **Standard library only** for networking (`asyncio`, `socket`, `ssl`,
@@ -200,7 +202,7 @@ The app is built to run from a **read-only** location (e.g. `Program Files`):
 | Credentials leaking via the repo | `auth` lives only in `config.json`; example uses placeholders. |
 | Operator actions being unaccountable | Structured append-only audit log of every command, web-open, config change, and status check. |
 | Malformed/hostile config crashing the app | Two-stage validation, typed exceptions, atomic saves, best-effort state. |
-| A probe/command unintentionally changing device state | Status checks send no data; commands are explicit and config-defined; everything is timeout-bounded. |
+| A probe/command unintentionally changing device state | Status checks are read-only (TCP connect, or a single GET); commands are explicit and config-defined; everything is timeout-bounded. |
 | Self-signed LAN certs forcing insecure global settings | TLS verification is **on by default**; opt-out is **per-command** and audited. |
 | Background crash going unnoticed in a windowed build | Excepthooks capture main- and worker-thread crashes to the diagnostic log. |
 

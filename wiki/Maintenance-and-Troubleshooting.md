@@ -101,6 +101,15 @@ The control panel shows the exact error. Common cases:
   `state.recording`).
 - TLS / auth (if the endpoint needs it).
 
+### The Overview shows "—" for uptime (no history)
+
+Uptime is built from saved samples. A room shows **—** until at least one
+**Check Status** or **Refresh All** sweep has recorded a sample for it. If it
+*never* fills in, the history database may be unwritable — check
+`mission-deck.log` for a "Could not open/record history" warning. The database
+lives at `<per-user dir>/history.db` (override with `MISSION_DECK_HISTORY_DB`);
+uptime history is best-effort and never blocks the app.
+
 ### Settings or "last config" not remembered
 
 Preferences persist to `state.json` in the per-user dir. If they don't stick,
@@ -121,6 +130,9 @@ Rebuild with `pyinstaller mission-deck.spec`. See
 - **Logs** self-manage: they rotate at ~2 MB with 5 backups, so no manual
   pruning is needed for disk space. For compliance, **forward `audit.log`** to a
   central collector.
+- **Uptime history** (`history.db`) self-prunes: samples older than
+  `history_retention_days` (default 30) are deleted on each launch. To reset
+  trends, stop the app and delete the file — it's rebuilt on the next sweep.
 - **Config backups:** keep `config.json` under your own (private, access-
   controlled) backup — it is *not* in git by design. Saves are atomic, so an
   in-app edit can't corrupt it mid-write, but a backup protects against mistakes.
@@ -169,7 +181,8 @@ with `config.example.json` to confirm the app itself is healthy.
 
 | Check | Expected result |
 |-------|-----------------|
-| Launch with valid config | Dashboard opens to last room/first room |
+| Launch with valid config | Opens to the Overview (or last/first room per settings) |
+| Open the ⌂ Overview, click Refresh All | KPIs/attention/uptime panels populate after the sweep |
 | Launch with no config | Welcome screen |
 | Launch with broken config | Error dialog, then welcome screen |
 | Check Status on a reachable device | Green dot + latency |
