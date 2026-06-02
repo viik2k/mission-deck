@@ -20,11 +20,14 @@ is git-ignored. The repository ships ``config.example.json`` with dummy data.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 # The schema version this build understands. Bump when the on-disk format
 # changes in a backwards-incompatible way.
@@ -213,27 +216,35 @@ def load_config(path: str | os.PathLike[str] | None = None) -> LoadedConfig:
     if path is None:
         found = find_config()
         if found is None:
-            raise ConfigNotFoundError(candidate_config_paths())
+            searched = candidate_config_paths()
+            logger.info("No config.json found; searched %d locations", len(searched))
+            raise ConfigNotFoundError(searched)
         config_path = found
     else:
         config_path = Path(path).expanduser()
         if not config_path.is_file():
+            logger.info("Requested config does not exist: %s", config_path)
             raise ConfigNotFoundError([config_path])
 
+    logger.debug("Loading config from %s", config_path)
     try:
         raw_text = config_path.read_text(encoding="utf-8")
     except OSError as exc:
+        logger.error("Unable to read config '%s': %s", config_path, exc)
         raise ConfigError(f"Unable to read '{config_path}': {exc}") from exc
 
     try:
         data = json.loads(raw_text)
     except json.JSONDecodeError as exc:
+        logger.error("Config '%s' is not valid JSON: %s", config_path, exc)
         raise ConfigParseError(
             f"'{config_path}' is not valid JSON: {exc.msg} "
             f"(line {exc.lineno}, column {exc.colno})"
         ) from exc
 
     _validate_structure(data, config_path)
+    room_count = len(data.get("rooms", [])) if isinstance(data, dict) else 0
+    logger.info("Loaded config %s (%d room(s))", config_path, room_count)
     return LoadedConfig(path=config_path, data=data)
 
 
@@ -265,11 +276,13 @@ def save_config(path: str | os.PathLike[str], data: dict[str, Any]) -> Path:
         tmp.write_text(text, encoding="utf-8")
         os.replace(tmp, target)
     except OSError as exc:
+        logger.error("Unable to save config '%s': %s", target, exc)
         try:
             tmp.unlink(missing_ok=True)
         except OSError:
             pass
         raise ConfigError(f"Unable to save '{target}': {exc}") from exc
+    logger.info("Saved config %s", target)
     return target
 
 

@@ -18,8 +18,10 @@ to edit JSON by hand.
 
 from __future__ import annotations
 
+import logging
 import queue
 import threading
+import traceback
 from pathlib import Path
 from tkinter import filedialog, messagebox
 
@@ -27,6 +29,7 @@ import customtkinter as ctk
 
 from mission_deck import __app_name__, __version__
 from mission_deck.browser import BrowserConfig, open_urls
+from mission_deck.logging_setup import audit, setup_logging
 from mission_deck.controls import DeviceControl, controls_for
 from mission_deck.editors import (
     CommandEditorDialog,
@@ -41,7 +44,15 @@ from mission_deck.config import (
     load_config,
     save_config,
 )
-from mission_deck.models import Device, DeviceStatus, Recorder, RecordingStatus, Room, Site
+from mission_deck.models import (
+    Device,
+    DeviceConfigError,
+    DeviceStatus,
+    Recorder,
+    RecordingStatus,
+    Room,
+    Site,
+)
 from mission_deck.state import AppState
 from mission_deck.theme import (
     CORNER,
@@ -55,6 +66,8 @@ from mission_deck.theme import (
     status_color,
     status_label,
 )
+
+logger = logging.getLogger(__name__)
 
 
 # --------------------------------------------------------------------------- #
@@ -571,12 +584,14 @@ class DeviceControlDialog(ctk.CTkToplevel):
             self.destroy()
 
     def _focus(self) -> None:
+        # Window focus/grab can fail transiently on some window managers; it is
+        # cosmetic, so we never let it bubble — but we record it for diagnosis.
         try:
             self.lift()
             self.grab_set()
             self.focus_force()
         except Exception:
-            pass
+            logger.debug("Could not focus control dialog", exc_info=True)
 
     def _set_status(self, text: str, text_color: str | None = None, duration_ms: int = 5000) -> None:
         if self._status_clear_job:
@@ -598,8 +613,31 @@ class DeviceControlDialog(ctk.CTkToplevel):
             if value is None:  # cancelled
                 return
         self._set_status(f"Running “{control.label}”…", duration_ms=0)
+        device = self.device
+        logger.info(
+            "Running control '%s' (%s) on device %s (%s)",
+            control.label, control.kind, device.id, device.host,
+        )
 
         def on_done(ok: bool, message: str) -> None:
+            # Audit every command attempt with its outcome — this is the record
+            # of who operated which courtroom device, and whether it worked.
+            audit(
+                "device.command",
+                device_id=device.id,
+                device_name=device.name,
+                device_type=device.type,
+                host=device.host,
+                control=control.label,
+                kind=control.kind,
+                prompted=control.prompt is not None,
+                ok=ok,
+                result=message,
+            )
+            if not ok:
+                logger.warning(
+                    "Control '%s' on %s failed: %s", control.label, device.id, message
+                )
             self._set_status(
                 message,
                 text_color=COLORS["online"] if ok else COLORS["offline"],
@@ -725,6 +763,14 @@ class SettingsDialog(ctk.CTkToplevel):
         self.app_state.browser_new_window = bool(self._new_window.get())
         self.app_state.save()
 
+        audit(
+            "settings.change",
+            ping_timeout_seconds=timeout,
+            auto_refresh_seconds=refresh,
+            browser_path=self.app_state.browser_path,
+            browser_new_window=self.app_state.browser_new_window,
+        )
+        logger.info("Settings updated (timeout=%.1fs, auto_refresh=%ds)", timeout, refresh)
         self.app.apply_settings()
         self.destroy()
 
@@ -742,6 +788,10 @@ class App(ctk.CTk):
         super().__init__()
         self.site = site
         self.config_path = config_path
+        logger.info(
+            "App window initialising (%d room(s), config=%s)",
+            len(site.rooms), config_path if config_path else "demo",
+        )
         # NB: ``app_state`` (not ``state``) — Tk reserves ``state()`` as a method.
         self.app_state = state if state is not None else AppState.load()
         self.browser_cfg = self._effective_browser_cfg()
@@ -1338,6 +1388,14 @@ class App(ctk.CTk):
             where = Path(self.browser_cfg.path).stem or "browser"
         elif self.browser_cfg.name:
             where = self.browser_cfg.name
+        logger.info("Opening %d web UI(s) for room '%s'", opened, self.current_room.name)
+        audit(
+            "room.open_web_uis",
+            room_id=self.current_room.id,
+            room_name=self.current_room.name,
+            count=opened,
+            browser=where,
+        )
         self._set_statusbar(
             f"Opening {opened} web UI(s) for '{self.current_room.name}' in {where}…"
         )
@@ -1369,6 +1427,10 @@ class App(ctk.CTk):
 
         timeout = self._effective_timeout()
         result_queue = self._result_queue
+        logger.info(
+            "Status check started for room '%s' (%d device(s), timeout %.1fs)",
+            room.name, len(devices), timeout,
+        )
 
         def publish(result: CheckResult) -> None:
             # Runs on the worker thread: only touch the thread-safe queue here.
@@ -1459,8 +1521,23 @@ class App(ctk.CTk):
         self._checking = False
         self._check_btn.configure(state="normal", text="Check Status")
         self._update_statusbar()
-        if self._checking_room:
-            self._refresh_room_health(self._checking_room)
+        room = self._checking_room
+        if room:
+            self._refresh_room_health(room)
+            online = sum(1 for d in room.devices if d.status is DeviceStatus.ONLINE)
+            offline = sum(1 for d in room.devices if d.status is DeviceStatus.OFFLINE)
+            logger.info(
+                "Status check complete for room '%s': %d online, %d offline",
+                room.name, online, offline,
+            )
+            audit(
+                "status_check.complete",
+                room_id=room.id,
+                room_name=room.name,
+                devices=len(room.devices),
+                online=online,
+                offline=offline,
+            )
 
     # ------------------------------------------------------------------ #
     # Effective settings (state overrides config)
@@ -1499,6 +1576,10 @@ class App(ctk.CTk):
             try:
                 result_queue.put((True, work()))
             except Exception as exc:  # surface any failure to the dialog
+                # Full traceback to the diagnostic log; concise text to the UI.
+                logger.warning(
+                    "Background task failed: %s\n%s", exc, traceback.format_exc()
+                )
                 result_queue.put((False, str(exc)))
 
         threading.Thread(target=worker, daemon=True).start()
@@ -1547,11 +1628,19 @@ class App(ctk.CTk):
         try:
             save_config(self.config_path, self.site.to_dict())
         except (ConfigError, OSError) as exc:
+            logger.error("Failed to save config to %s: %s", self.config_path, exc)
+            audit("config.save", path=str(self.config_path), ok=False, error=str(exc))
             messagebox.showerror(
                 __app_name__, f"Could not save your configuration:\n\n{exc}"
             )
             return False
 
+        audit(
+            "config.save",
+            path=str(self.config_path),
+            ok=True,
+            rooms=len(self.site.rooms),
+        )
         self.app_state.remember_config(self.config_path)
         self.app_state.save()
         self._refresh_config_footer()
@@ -1616,6 +1705,8 @@ class App(ctk.CTk):
             filetypes=[("JSON config", "*.json"), ("All files", "*.*")],
         )
         if chosen:
+            logger.info("User requested config switch to %s", chosen)
+            audit("config.switch", to=str(Path(chosen)), frm=str(self.config_path) if self.config_path else None)
             self.requested_config = Path(chosen)
             self.destroy()
 
@@ -1752,8 +1843,10 @@ def _resolve_startup_choice(state: AppState) -> tuple[str, Path | None]:
     return welcome.result
 
 
-def main() -> None:
-    state = AppState.load()
+def _run(state: AppState) -> None:
+    """The startup/soft-restart loop. Separated so :func:`main` can wrap it with
+    logging setup and a top-level safety net."""
+
     pending: Path | None = None  # set when the user switches config (soft restart)
 
     while True:
@@ -1764,6 +1857,7 @@ def main() -> None:
             kind, path = _resolve_startup_choice(state)
 
         if kind == "quit":
+            logger.info("User chose to quit at startup")
             return
 
         try:
@@ -1772,7 +1866,11 @@ def main() -> None:
                 path = None
             else:
                 site = Site.from_loaded_config(load_config(path))
-        except (ConfigError, OSError) as exc:
+        except (ConfigError, DeviceConfigError, OSError) as exc:
+            # ConfigError      -> file missing / unreadable / bad JSON / bad shape
+            # DeviceConfigError -> structurally OK but a room/device is invalid
+            logger.error("Could not load configuration (%s): %s", type(exc).__name__, exc)
+            audit("config.load", path=str(path) if path else None, ok=False, error=str(exc))
             messagebox.showerror(
                 __app_name__, f"Could not load configuration:\n\n{exc}"
             )
@@ -1780,6 +1878,13 @@ def main() -> None:
             state.last_config_path = None
             continue
 
+        audit(
+            "config.load",
+            path=str(path) if path else None,
+            demo=path is None,
+            rooms=len(site.rooms),
+            ok=True,
+        )
         if path is not None:
             state.remember_config(path)
             state.save()
@@ -1792,6 +1897,31 @@ def main() -> None:
             pending = app.requested_config
             continue
         return
+
+
+def main() -> None:
+    log_location = setup_logging()
+    logger.info("mission-deck %s starting", __version__)
+    audit("app.start", version=__version__, log_dir=str(log_location) if log_location else None)
+    state = AppState.load()
+    try:
+        _run(state)
+    except Exception:  # last-resort safety net for an otherwise-fatal crash
+        logger.critical("Fatal error; the application must close", exc_info=True)
+        detail = traceback.format_exc()
+        where = f"\n\nDetails were written to the log{f' at {log_location}' if log_location else ''}."
+        try:
+            messagebox.showerror(
+                __app_name__,
+                "mission-deck hit an unexpected error and needs to close."
+                f"{where}\n\n{detail.strip().splitlines()[-1]}",
+            )
+        except Exception:
+            pass  # GUI may already be torn down; the log is the record that matters.
+        raise
+    finally:
+        logger.info("mission-deck exiting")
+        audit("app.stop")
 
 
 if __name__ == "__main__":

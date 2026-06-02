@@ -210,6 +210,31 @@ On first launch (no config found) a welcome screen lets you open a config file
 or explore the demo data. After that, the app reopens your last config
 automatically.
 
+## Logging & auditing
+
+mission-deck keeps two rotating log files in a writable per-user directory
+(`%APPDATA%\mission-deck\logs` on Windows, `~/.config/mission-deck/logs` on
+Linux, `~/Library/Application Support/mission-deck/logs` on macOS):
+
+- **`mission-deck.log`** — diagnostic detail for support and troubleshooting
+  (config loading, device probes, control transports, browser launches, and full
+  tracebacks for anything unexpected — including crashes on background threads).
+- **`audit.log`** — an append-only, JSON-per-line record of operator actions for
+  compliance: every device command issued (and its outcome), web UIs opened,
+  status-check summaries, configuration loads/saves/switches, and settings
+  changes. Each entry records the timestamp, action, and OS username.
+
+Environment overrides:
+
+| Variable | Effect |
+|----------|--------|
+| `MISSION_DECK_LOG_DIR` | Write both logs to a custom directory. |
+| `MISSION_DECK_LOG_LEVEL` | Diagnostic verbosity (`DEBUG`, `INFO`, `WARNING`, …). Default `INFO`. Use `DEBUG` to trace individual probes and commands. |
+
+Logs rotate at ~2 MB (5 generations kept), so they never run the disk out of
+space even on a long-lived install. If the log directory can't be created, the
+app degrades gracefully to console logging rather than failing to start.
+
 ## Packaging a single EXE
 
 The app is built to ship as one double-clickable `.exe` so non-technical users
@@ -249,6 +274,7 @@ mission-deck/
     ├── browser.py           # open web UIs in the configured browser
     ├── state.py             # remembered config + GUI-managed preferences
     ├── theme.py             # dark palette + sizing tokens
+    ├── logging_setup.py     # diagnostic + audit logging configuration
     └── app.py               # CustomTkinter UI
 ```
 

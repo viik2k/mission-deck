@@ -16,6 +16,7 @@ app's job, keeping all disk/UI orchestration in one place (``app.py``).
 from __future__ import annotations
 
 import copy
+import logging
 import re
 from typing import TYPE_CHECKING, Callable, Iterable
 
@@ -32,6 +33,8 @@ from mission_deck.models import (
 )
 from mission_deck.network import ControlError
 from mission_deck.theme import COLORS, CORNER, GAP, PAD
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:  # avoid a circular import at runtime (app imports editors)
     from mission_deck.app import App
@@ -190,6 +193,7 @@ class _FormDialog(ctk.CTkToplevel):
         ).grid(row=0, column=2)
 
     def _error(self, message: str) -> None:
+        logger.warning("%s: validation error shown to user: %s", type(self).__name__, message)
         messagebox.showerror(__app_name__, message, parent=self)
 
     def _confirm(self, message: str) -> bool:

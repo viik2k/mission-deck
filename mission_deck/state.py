@@ -16,10 +16,13 @@ the app — it just falls back to defaults.
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 from mission_deck.config import user_config_dir
+
+logger = logging.getLogger(__name__)
 
 STATE_FILENAME = "state.json"
 
@@ -48,9 +51,14 @@ class AppState:
         path = state_path()
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
+        except FileNotFoundError:
+            logger.debug("No saved state at %s; using defaults", path)
+            return cls()
+        except (OSError, ValueError) as exc:
+            logger.warning("Could not read state file %s (%s); using defaults", path, exc)
             return cls()
         if not isinstance(data, dict):
+            logger.warning("State file %s is not a JSON object; using defaults", path)
             return cls()
         # Only accept known keys so a future/older file can't crash construction.
         known = {f for f in cls.__dataclass_fields__}
@@ -61,8 +69,10 @@ class AppState:
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(json.dumps(asdict(self), indent=2), encoding="utf-8")
-        except OSError:
-            pass  # never let a failed save break the app
+        except OSError as exc:
+            # Never let a failed save break the app, but don't fail silently
+            # either — a lost preference write is worth a log line.
+            logger.warning("Could not save state to %s: %s", path, exc)
 
     # ------------------------------------------------------------------ #
     def remember_config(self, config_path: Path | str) -> None:
