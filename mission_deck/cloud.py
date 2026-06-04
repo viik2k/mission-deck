@@ -1,14 +1,15 @@
 """The Cloud Sync view — the OneDrive config-source concept.
 
 mission-deck's config discovery order (env var → CWD → app dir → per-user dir)
-gains a cloud-backed option: a config source that delivers ``config.json`` to
-every workstation, with revisioned pull/push and a conflict-aware merge.
+will gain a cloud-backed option: a config source that delivers ``config.json``
+to every workstation, with revisioned pull/push and a conflict-aware merge.
 Credentials are per-user; no estate data lives in the repo.
 
-This is a presentation-only placeholder ("coming soon"): the *Sync now*,
-*Push*, and *Configure* affordances are not yet wired to a real Graph API
-client. The live device count is read from the loaded site so the panel
-reflects the real estate size.
+This screen only appears once the **Cloud Sync** plugin is activated on the
+Plugins page. It is deliberately a "coming soon" preview — the connect / sync
+affordances are not wired to a real Graph API client yet. It shows the shape of
+the feature (the estate it *would* sync is read live from the loaded site) plus
+the value props, leaving the base in place for when the integration is built.
 """
 
 from __future__ import annotations
@@ -25,15 +26,6 @@ from mission_deck.theme import (
     PAD,
 )
 
-# Illustrative sync timeline. (mark: ok / push / conflict)
-SYNC_LOG: list[tuple[str, str, str, str]] = [
-    ("ok", "Pulled config.json", "rev 184 · scheduled sync · no conflicts", "14:48"),
-    ("push", "Pushed local edit", "Courtroom 3C · added Poly Studio X50", "13:59"),
-    ("conflict", "Merge conflict resolved", "kept remote · Courtroom 7 host change", "11:28"),
-    ("ok", "Pulled config.json", "rev 182 · scheduled sync", "09:00"),
-    ("ok", "Connected OneDrive", "AV-Estate / mission-deck / config.json", "Mon 08:14"),
-]
-
 _FEATURES = [
     ("Multi-workstation", "Every operator PC loads one authoritative config — no "
      "more emailing JSON or hand-editing per machine."),
@@ -44,42 +36,15 @@ _FEATURES = [
 ]
 
 
-def _panel(master) -> ctk.CTkFrame:
-    return ctk.CTkFrame(
-        master, corner_radius=CORNER_LG, fg_color=COLORS["card"],
-        border_width=1, border_color=COLORS["border"],
-    )
-
-
-def _panel_header(panel, title: str, sub: str = "", icon_name: str | None = None) -> None:
-    head = ctk.CTkFrame(panel, fg_color="transparent")
-    head.grid(row=0, column=0, sticky="ew", padx=PAD, pady=(PAD - 2, 0))
-    if icon_name:
-        ctk.CTkLabel(
-            head, text="", image=icon(icon_name, 16, COLORS["info"]),
-        ).pack(side="left", padx=(0, 8))
-    ctk.CTkLabel(
-        head, text=title, anchor="w",
-        font=ctk.CTkFont(size=13, weight="bold"), text_color=COLORS["text"],
-    ).pack(side="left")
-    if sub:
-        ctk.CTkLabel(
-            head, text=sub, anchor="e",
-            font=ctk.CTkFont(size=11), text_color=COLORS["text_faint"],
-        ).pack(side="right")
-
-
 class CloudView(ctk.CTkScrollableFrame):
     """OneDrive config-source screen (presentation-only placeholder)."""
 
     def __init__(self, master, app: "App"):  # noqa: F821 - App imported lazily
         super().__init__(master, fg_color="transparent")
         self.app = app
-        self.grid_columnconfigure(0, weight=2, uniform="cloud")
-        self.grid_columnconfigure(1, weight=1, uniform="cloud")
+        self.grid_columnconfigure(0, weight=1)
 
-        self._build_source_panel()
-        self._build_activity_panel()
+        self._build_hero()
 
         note = spec_note(
             self,
@@ -89,136 +54,65 @@ class CloudView(ctk.CTkScrollableFrame):
             "on conflict. Credentials are per-user; no estate data lives in the "
             "repo.  (Coming soon.)",
         )
-        note.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(GAP, 0))
+        note.grid(row=1, column=0, sticky="ew", pady=(GAP, 0))
 
         self._build_feature_cards()
 
     # ------------------------------------------------------------------ #
-    def _build_source_panel(self) -> None:
-        panel = _panel(self)
-        panel.grid(row=0, column=0, sticky="nsew", padx=(0, GAP // 2))
-        panel.grid_columnconfigure(0, weight=1)
-        _panel_header(panel, "OneDrive — connected", "AV-Estate · tenant", icon_name="cloud")
+    def _build_hero(self) -> None:
+        hero = ctk.CTkFrame(
+            self, corner_radius=CORNER_LG, fg_color=COLORS["card"],
+            border_width=1, border_color=COLORS["border"],
+        )
+        hero.grid(row=0, column=0, sticky="ew")
+        hero.grid_columnconfigure(0, weight=1)
 
-        body = ctk.CTkFrame(panel, fg_color="transparent")
-        body.grid(row=1, column=0, sticky="ew", padx=PAD, pady=PAD)
-        body.grid_columnconfigure((0, 1), weight=1)
-
+        # Centred placeholder block.
+        inner = ctk.CTkFrame(hero, fg_color="transparent")
+        inner.grid(row=0, column=0, pady=(46, 12))
         ctk.CTkLabel(
-            body, text="CONFIG SOURCE", anchor="w",
-            font=ctk.CTkFont(size=10, weight="bold"), text_color=COLORS["text_faint"],
-        ).grid(row=0, column=0, columnspan=2, sticky="w")
+            inner, text="", image=icon("cloud", 52, COLORS["ghost"]),
+        ).pack()
         ctk.CTkLabel(
-            body, text="  AV-Estate / mission-deck / config.json", anchor="w",
-            image=icon("folder", 14, COLORS["text_muted"]), compound="left",
-            height=34, corner_radius=CORNER, fg_color=COLORS["card_2"],
-            font=ctk.CTkFont(size=12, family="Consolas"), text_color=COLORS["text"],
-        ).grid(row=1, column=0, columnspan=2, sticky="ew", pady=(6, GAP))
+            inner, text="Cloud Sync is coming soon", anchor="center",
+            font=ctk.CTkFont(size=18, weight="bold"), text_color=COLORS["text"],
+        ).pack(pady=(10, 2))
+        ctk.CTkLabel(
+            inner, text="Sync config.json from OneDrive / SharePoint so every "
+            "workstation loads the same estate.",
+            anchor="center", justify="center", wraplength=520,
+            font=ctk.CTkFont(size=12), text_color=COLORS["text_muted"],
+        ).pack()
 
+        # The estate it would sync — real numbers from the loaded site.
         device_count = len(list(self.app.site.all_devices()))
         room_count = len(self.app.site.rooms)
-        stats = [
-            ("REVISION", "rev 184", COLORS["text"]),
-            ("LAST PULLED", "4 min ago", COLORS["text"]),
-            ("ROOMS · DEVICES", f"{room_count} · {device_count}", COLORS["text"]),
-            ("AUTO-SYNC", "every 15 min", COLORS["online"]),
-        ]
-        for index, (label, value, color) in enumerate(stats):
-            row, col = divmod(index, 2)
-            cell = ctk.CTkFrame(
-                body, corner_radius=CORNER, fg_color=COLORS["card_2"],
-                border_width=1, border_color=COLORS["border"],
-            )
-            cell.grid(
-                row=2 + row, column=col, sticky="ew",
-                padx=(0 if col == 0 else GAP // 2, 0 if col == 1 else GAP // 2),
-                pady=(0, GAP),
-            )
-            ctk.CTkLabel(
-                cell, text=label, anchor="w",
-                font=ctk.CTkFont(size=10), text_color=COLORS["text_faint"],
-            ).pack(anchor="w", padx=GAP, pady=(8, 0))
-            ctk.CTkLabel(
-                cell, text=value, anchor="w",
-                font=ctk.CTkFont(size=14, family="Consolas"), text_color=color,
-            ).pack(anchor="w", padx=GAP, pady=(0, 8))
-
-        # Conflict banner.
-        conflict = ctk.CTkFrame(
-            body, corner_radius=CORNER, fg_color="#2a2212",
-            border_width=1, border_color=COLORS["warn"],
+        chip = ctk.CTkFrame(
+            hero, corner_radius=CORNER, fg_color=COLORS["card_2"],
+            border_width=1, border_color=COLORS["border"],
         )
-        conflict.grid(row=4, column=0, columnspan=2, sticky="ew", pady=(0, GAP))
-        conflict.grid_columnconfigure(1, weight=1)
+        chip.grid(row=1, column=0, pady=(0, 8))
         ctk.CTkLabel(
-            conflict, text="", image=icon("warn", 20, COLORS["warn"]),
-        ).grid(row=0, column=0, rowspan=2, padx=(GAP, 6), pady=GAP)
-        ctk.CTkLabel(
-            conflict, text="1 local edit not yet pushed", anchor="w",
-            font=ctk.CTkFont(size=12, weight="bold"), text_color=COLORS["text"],
-        ).grid(row=0, column=1, sticky="w", pady=(GAP, 0))
-        ctk.CTkLabel(
-            conflict, text="Courtroom 3C · added Poly Studio X50 backup VC", anchor="w",
-            font=ctk.CTkFont(size=11), text_color=COLORS["text_muted"],
-        ).grid(row=1, column=1, sticky="w", pady=(0, GAP))
+            chip, text=f"  {room_count} rooms · {device_count} devices ready to sync  ",
+            image=icon("folder", 14, COLORS["text_muted"]), compound="left",
+            height=30, font=ctk.CTkFont(size=12, family="Consolas"),
+            text_color=COLORS["text_muted"],
+        ).pack(padx=PAD)
+
+        # Base CTA — disabled until the Graph client lands.
         ctk.CTkButton(
-            conflict, text="Push", image=icon("refresh", 14, "#ffffff"), compound="left",
-            width=80, height=30, corner_radius=CORNER,
-            fg_color=COLORS["accent"], hover_color=COLORS["accent_hover"],
-            font=ctk.CTkFont(size=12, weight="bold"), command=lambda: None,
-        ).grid(row=0, column=2, rowspan=2, padx=(0, GAP))
-
-        actions = ctk.CTkFrame(body, fg_color="transparent")
-        actions.grid(row=5, column=0, columnspan=2, sticky="w")
-        for label, name in (("Revision history", "history"), ("Preview remote", "eye"),
-                            ("Change file…", "folder")):
-            ctk.CTkButton(
-                actions, text=label, image=icon(name, 14, COLORS["text_muted"]), compound="left",
-                height=30, corner_radius=CORNER,
-                fg_color="transparent", hover_color=COLORS["card_hover"],
-                border_width=1, border_color=COLORS["border"], text_color=COLORS["text_muted"],
-                font=ctk.CTkFont(size=12), command=lambda: None,
-            ).pack(side="left", padx=(0, GAP))
-
-    # ------------------------------------------------------------------ #
-    def _build_activity_panel(self) -> None:
-        panel = _panel(self)
-        panel.grid(row=0, column=1, sticky="nsew", padx=(GAP // 2, 0))
-        panel.grid_columnconfigure(0, weight=1)
-        panel.grid_rowconfigure(1, weight=1)
-        _panel_header(panel, "Sync activity", icon_name="history")
-
-        body = ctk.CTkFrame(panel, fg_color="transparent")
-        body.grid(row=1, column=0, sticky="nsew", padx=PAD, pady=PAD)
-        body.grid_columnconfigure(1, weight=1)
-        mark_color = {
-            "ok": COLORS["online"], "push": COLORS["accent"], "conflict": COLORS["warn"],
-        }
-        for index, (mark, title, detail, when) in enumerate(SYNC_LOG):
-            ctk.CTkLabel(
-                body, text="●", width=14, font=ctk.CTkFont(size=12),
-                text_color=mark_color.get(mark, COLORS["accent"]),
-            ).grid(row=index, column=0, sticky="n", pady=(6, 0))
-            text = ctk.CTkFrame(body, fg_color="transparent")
-            text.grid(row=index, column=1, sticky="ew", pady=(4, 4))
-            text.grid_columnconfigure(0, weight=1)
-            ctk.CTkLabel(
-                text, text=title, anchor="w",
-                font=ctk.CTkFont(size=12), text_color=COLORS["text"],
-            ).grid(row=0, column=0, sticky="ew")
-            ctk.CTkLabel(
-                text, text=detail, anchor="w", justify="left", wraplength=220,
-                font=ctk.CTkFont(size=11, family="Consolas"), text_color=COLORS["text_faint"],
-            ).grid(row=1, column=0, sticky="ew")
-            ctk.CTkLabel(
-                body, text=when, anchor="e",
-                font=ctk.CTkFont(size=11, family="Consolas"), text_color=COLORS["text_faint"],
-            ).grid(row=index, column=2, sticky="ne", padx=(GAP, 0), pady=(4, 0))
+            hero, text="Connect OneDrive", image=icon("cloud", 15, COLORS["text_faint"]),
+            compound="left", width=180, height=34, corner_radius=CORNER,
+            fg_color=COLORS["card_2"], hover_color=COLORS["card_2"],
+            border_width=1, border_color=COLORS["border"],
+            text_color=COLORS["text_faint"], font=ctk.CTkFont(size=13, weight="bold"),
+            state="disabled", command=lambda: None,
+        ).grid(row=2, column=0, pady=(0, 46))
 
     # ------------------------------------------------------------------ #
     def _build_feature_cards(self) -> None:
         cards = ctk.CTkFrame(self, fg_color="transparent")
-        cards.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(GAP, 0))
+        cards.grid(row=2, column=0, sticky="ew", pady=(GAP, 0))
         for col in range(3):
             cards.grid_columnconfigure(col, weight=1, uniform="feat")
         for index, (title, desc) in enumerate(_FEATURES):
