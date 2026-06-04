@@ -25,7 +25,7 @@ from datetime import datetime
 
 import customtkinter as ctk
 
-from mission_deck.logging_setup import current_user, tail_audit
+from mission_deck.logging_setup import tail_audit
 from mission_deck.models import (
     Device,
     DeviceStatus,
@@ -105,80 +105,19 @@ class DashboardView(ctk.CTkFrame):
         self._sig_activity: tuple | None = None
 
         self.grid_columnconfigure(0, weight=1)
-        self.grid_rowconfigure(1, weight=1)
+        self.grid_rowconfigure(0, weight=1)
 
-        self._build_header()
+        # The shared top bar (in App) owns the title, Refresh All / Auto controls
+        # and the user chip for this view; the dashboard only renders its body.
         self._build_body()
         self.refresh()
-
-    # ------------------------------------------------------------------ #
-    # Header
-    # ------------------------------------------------------------------ #
-    def _build_header(self) -> None:
-        header = ctk.CTkFrame(self, corner_radius=0, fg_color=COLORS["header"], height=88)
-        header.grid(row=0, column=0, sticky="ew")
-        header.grid_propagate(False)
-        header.grid_columnconfigure(0, weight=1)
-
-        title_block = ctk.CTkFrame(header, fg_color="transparent")
-        title_block.grid(row=0, column=0, sticky="w", padx=PAD + 8, pady=PAD)
-        ctk.CTkLabel(
-            title_block, text="Overview", anchor="w",
-            font=ctk.CTkFont(size=22, weight="bold"), text_color=COLORS["text"],
-        ).pack(anchor="w")
-        ctk.CTkLabel(
-            title_block, text="Estate-wide health at a glance", anchor="w",
-            font=ctk.CTkFont(size=13), text_color=COLORS["text_muted"],
-        ).pack(anchor="w")
-
-        actions = ctk.CTkFrame(header, fg_color="transparent")
-        actions.grid(row=0, column=1, sticky="e", padx=PAD + 8, pady=PAD)
-        # Packed right→left: primary Refresh, then the settings gear, the auto
-        # toggle, the last-sweep stamp, and finally the signed-in-user chip.
-        self._refresh_btn = ctk.CTkButton(
-            actions, text="Refresh All", width=140, height=40, corner_radius=CORNER,
-            fg_color=COLORS["accent"], hover_color=COLORS["accent_hover"],
-            font=ctk.CTkFont(size=14, weight="bold"), command=self.app.run_estate_sweep,
-        )
-        self._refresh_btn.pack(side="right")
-        # Settings gear — mirrors the room view so preferences are reachable
-        # from the overview without first opening a room.
-        ctk.CTkButton(
-            actions, text="⚙", width=40, height=40, corner_radius=CORNER,
-            fg_color="transparent", hover_color=COLORS["card_hover"],
-            border_width=1, border_color=COLORS["border"], text_color=COLORS["text"],
-            font=ctk.CTkFont(size=16), command=self.app.open_settings,
-        ).pack(side="right", padx=(0, GAP))
-        self._auto_var = ctk.BooleanVar(value=self.app.app_state.dashboard_poll_enabled)
-        ctk.CTkSwitch(
-            actions, text="Auto", variable=self._auto_var,
-            command=lambda: self.app.on_toggle_dashboard_poll(bool(self._auto_var.get())),
-            font=ctk.CTkFont(size=12), text_color=COLORS["text_muted"],
-        ).pack(side="right", padx=(0, GAP + 4))
-        self._sweep_label = ctk.CTkLabel(
-            actions, text="", anchor="e",
-            font=ctk.CTkFont(size=11), text_color=COLORS["text_faint"],
-        )
-        self._sweep_label.pack(side="right", padx=(0, GAP + 4))
-        # Signed-in operator chip — the same name (OS login) every action is
-        # audited under, so an operator can confirm at a glance who they are.
-        user = current_user()
-        chip = ctk.CTkFrame(
-            actions, corner_radius=CORNER, fg_color=COLORS["card"],
-            border_width=1, border_color=COLORS["border"],
-        )
-        chip.pack(side="right", padx=(0, GAP + 4))
-        ctk.CTkLabel(
-            chip, text=f"  👤  {user}  ", height=40,
-            font=ctk.CTkFont(size=12, weight="bold"), text_color=COLORS["text_muted"],
-        ).pack()
 
     # ------------------------------------------------------------------ #
     # Body
     # ------------------------------------------------------------------ #
     def _build_body(self) -> None:
         body = ctk.CTkScrollableFrame(self, fg_color="transparent")
-        body.grid(row=1, column=0, sticky="nsew", padx=PAD, pady=PAD)
+        body.grid(row=0, column=0, sticky="nsew", padx=PAD, pady=PAD)
         body.grid_columnconfigure(0, weight=1)
         body.grid_columnconfigure(1, weight=1)
         self._body = body
@@ -237,23 +176,11 @@ class DashboardView(ctk.CTkFrame):
         self._refresh_recorders()
         self._refresh_uptime()
         self._refresh_activity()
-        self._refresh_sweep_label()
 
     def set_sweeping(self, sweeping: bool) -> None:
-        """Reflect an in-progress estate sweep in the header controls."""
+        """Reflect an in-progress estate sweep — delegated to the shared top bar."""
 
-        if sweeping:
-            self._refresh_btn.configure(state="disabled", text="Sweeping…")
-            self._sweep_label.configure(text="checking all rooms…")
-        else:
-            self._refresh_btn.configure(state="normal", text="Refresh All")
-            self._refresh_sweep_label()
-
-    def _refresh_sweep_label(self) -> None:
-        ts = self.app.last_sweep_time
-        self._sweep_label.configure(
-            text=f"last sweep {ts.strftime('%H:%M:%S')}" if ts else "no sweep yet"
-        )
+        self.app._set_overview_sweeping(sweeping)
 
     def _refresh_kpis(self) -> None:
         rooms = self.app.site.rooms
