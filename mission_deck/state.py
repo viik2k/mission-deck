@@ -37,6 +37,10 @@ class AppState:
 
     last_config_path: str | None = None
     recent_configs: list[str] = field(default_factory=list)
+    # Activated (downloaded) plugins, by stable id. A plugin that contributes a
+    # nav tile only shows it in the rail while its id is listed here. Built-in
+    # plugins (e.g. the tcp/http monitors) are always on and never stored.
+    enabled_plugins: list[str] = field(default_factory=list)
     # Preference overrides (None / "" / 0 means "fall back to the config file").
     ping_timeout_seconds: float | None = None
     # Max simultaneous status probes (0 = use the config/built-in default). The

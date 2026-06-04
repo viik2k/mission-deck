@@ -35,7 +35,7 @@ from mission_deck.dashboard import DashboardView
 from mission_deck.history import HistoryStore, Sample
 from mission_deck.icons import category_icon_name, icon
 from mission_deck.logging_setup import audit, current_user, setup_logging
-from mission_deck.plugins import PluginsView, spec_note
+from mission_deck.plugins import PluginsView, plugin_by_id, spec_note, tile_plugins
 from mission_deck.controls import DeviceControl, controls_for
 from mission_deck.editors import (
     CommandEditorDialog,
@@ -83,13 +83,14 @@ from mission_deck.theme import (
     status_label,
 )
 
-# Navigation entries for the icon rail: (key, label). The icon name == key.
+# Always-present navigation entries for the icon rail: (key, label). The icon
+# name == key. Plugin-contributed tiles (e.g. Cloud Sync) are appended at
+# runtime when their plugin is activated — see App._apply_plugin_tiles.
 NAV_ITEMS: list[tuple[str, str]] = [
     ("overview", "Overview"),
     ("rooms", "Rooms"),
     ("dashboards", "Dashboards"),
     ("plugins", "Plugins"),
-    ("cloud", "Cloud Sync"),
 ]
 
 
@@ -1062,7 +1063,7 @@ class App(ctk.CTk):
         rail.grid(row=0, column=0, sticky="nsew")
         rail.grid_propagate(False)
         rail.grid_columnconfigure(0, weight=1)
-        rail.grid_rowconfigure(len(NAV_ITEMS) + 1, weight=1)  # spacer pushes footer down
+        rail.grid_rowconfigure(2, weight=1)  # spacer between nav and footer
 
         # Brand mark.
         logo = ctk.CTkFrame(rail, width=34, height=34, corner_radius=9, fg_color=COLORS["accent"])
@@ -1071,23 +1072,29 @@ class App(ctk.CTk):
         ctk.CTkLabel(logo, text="", image=icon("logo", 19, "#ffffff")).place(
             relx=0.5, rely=0.5, anchor="center")
 
-        # Rail buttons carry image icons; ``_rail_icon_names`` lets the highlight
-        # logic re-tint them (a CTkImage can't be recoloured in place).
+        # Nav buttons live in their own packed container so plugin tiles can be
+        # added/removed at runtime without disturbing the footer. Rail buttons
+        # carry image icons; ``_rail_icon_names`` lets the highlight logic
+        # re-tint them (a CTkImage can't be recoloured in place).
         self._rail_buttons: dict[str, ctk.CTkButton] = {}
         self._rail_icon_names: dict[str, str] = {}
-        for index, (key, label) in enumerate(NAV_ITEMS, start=1):
-            btn = self._rail_button(rail, key, lambda k=key: self.navigate(k))
-            btn.grid(row=index, column=0, pady=3)
-            self._rail_buttons[key] = btn
-            self._rail_icon_names[key] = key
+        nav = ctk.CTkFrame(rail, fg_color="transparent")
+        nav.grid(row=1, column=0, sticky="n")
+        self._rail_nav = nav
+        for key, _label in NAV_ITEMS:
+            self._add_rail_button(key)
+        # Tiles for plugins the operator has already activated.
+        self._apply_plugin_tiles()
 
         # Footer: settings + user (config picker).
-        settings_btn = self._rail_button(rail, "settings", self.open_settings)
-        settings_btn.grid(row=len(NAV_ITEMS) + 2, column=0, pady=3)
+        footer = ctk.CTkFrame(rail, fg_color="transparent")
+        footer.grid(row=3, column=0, sticky="s", pady=(0, 12))
+        settings_btn = self._rail_button(footer, "settings", self.open_settings)
+        settings_btn.pack(pady=3)
         self._rail_buttons["settings"] = settings_btn
         self._rail_icon_names["settings"] = "settings"
-        user_btn = self._rail_button(rail, "user", self.switch_config_dialog)
-        user_btn.grid(row=len(NAV_ITEMS) + 3, column=0, pady=(3, 12))
+        user_btn = self._rail_button(footer, "user", self.switch_config_dialog)
+        user_btn.pack(pady=3)
         self._rail_buttons["user"] = user_btn
         self._rail_icon_names["user"] = "user"
 
@@ -1097,6 +1104,68 @@ class App(ctk.CTk):
             width=42, height=42, corner_radius=10,
             fg_color="transparent", hover_color=COLORS["card"], command=command,
         )
+
+    def _add_rail_button(self, key: str, icon_name: str | None = None) -> None:
+        """Add a navigable tile to the nav container (idempotent on ``key``)."""
+
+        if key in self._rail_buttons:
+            return
+        icon_name = icon_name or key
+        btn = self._rail_button(self._rail_nav, icon_name, lambda k=key: self.navigate(k))
+        btn.pack(pady=3)
+        self._rail_buttons[key] = btn
+        self._rail_icon_names[key] = icon_name
+
+    def _remove_rail_button(self, key: str) -> None:
+        btn = self._rail_buttons.pop(key, None)
+        if btn is not None:
+            btn.destroy()
+        self._rail_icon_names.pop(key, None)
+
+    def _apply_plugin_tiles(self) -> None:
+        """Ensure every enabled tile-providing plugin has a rail button."""
+
+        for spec in tile_plugins():
+            view_key, _label, icon_name = spec.tile
+            if self.is_plugin_enabled(spec.id):
+                self._add_rail_button(view_key, icon_name)
+            else:
+                self._remove_rail_button(view_key)
+
+    # ------------------------------------------------------------------ #
+    # Plugin activation (drives the rail tiles)
+    # ------------------------------------------------------------------ #
+    def is_plugin_enabled(self, plugin_id: str) -> bool:
+        spec = plugin_by_id(plugin_id)
+        if spec is not None and spec.builtin:
+            return True
+        return plugin_id in self.app_state.enabled_plugins
+
+    def set_plugin_enabled(self, plugin_id: str, enabled: bool) -> None:
+        """Activate/deactivate a plugin: persist it and sync its rail tile."""
+
+        spec = plugin_by_id(plugin_id)
+        if spec is None or spec.builtin:
+            return
+        if self.is_plugin_enabled(plugin_id) == enabled:
+            return
+        current = [p for p in self.app_state.enabled_plugins if p != plugin_id]
+        if enabled:
+            current.append(plugin_id)
+        self.app_state.enabled_plugins = sorted(current)
+        self.app_state.save()
+        audit("settings.change", plugin=plugin_id, enabled=enabled)
+
+        if spec.tile is not None:
+            view_key, _label, icon_name = spec.tile
+            if enabled:
+                self._add_rail_button(view_key, icon_name)
+            else:
+                # Leaving a now-hidden view: fall back to the Plugins screen.
+                if self._current_view == view_key:
+                    self.navigate("plugins")
+                self._remove_rail_button(view_key)
+        self._update_nav_highlight()
 
     # ------------------------------------------------------------------ #
     # Main column = top bar + swappable views
@@ -1229,6 +1298,9 @@ class App(ctk.CTk):
         if view == "settings":
             self.open_settings()
             return
+        # The Cloud Sync screen only exists while its plugin is activated.
+        if view == "cloud" and not self.is_plugin_enabled("cloud_sync"):
+            view = "plugins"
         frame = self._frame_for(view)
         if frame is None:
             return
@@ -1266,7 +1338,7 @@ class App(ctk.CTk):
         if existing is not None:
             return existing
         if view == "plugins":
-            frame = PluginsView(self._views)
+            frame = PluginsView(self._views, self)
         elif view == "cloud":
             frame = CloudView(self._views, self)
         else:
