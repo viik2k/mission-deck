@@ -20,6 +20,7 @@ Sections
 
 from __future__ import annotations
 
+import time
 import tkinter as tk
 from datetime import datetime
 
@@ -53,6 +54,8 @@ ACTIVITY_LIMIT = 18
 # can have hundreds of entries; rendering them all builds hundreds of widgets and
 # scrolls forever. We show the worst N and summarise the rest in a footer.
 MAX_LIST_ROWS = 200
+# Minimum seconds between navigate-triggered dashboard refreshes.
+_REFRESH_THROTTLE_S = 2.0
 
 
 # --------------------------------------------------------------------------- #
@@ -103,6 +106,7 @@ class DashboardView(ctk.CTkFrame):
         self._sig_recorders: tuple | None = None
         self._sig_uptime: tuple | None = None
         self._sig_activity: tuple | None = None
+        self._last_refresh_ts: float = 0.0
 
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(0, weight=1)
@@ -171,11 +175,22 @@ class DashboardView(ctk.CTkFrame):
     def refresh(self) -> None:
         """Repaint every section from the current site/history state."""
 
+        self._last_refresh_ts = time.monotonic()
         self._refresh_kpis()
         self._refresh_attention()
         self._refresh_recorders()
         self._refresh_uptime()
         self._refresh_activity()
+
+    def refresh_if_stale(self) -> None:
+        """Refresh only when _REFRESH_THROTTLE_S seconds have elapsed since the last full refresh.
+
+        Called on every navigate("overview") so rapid tab-switching doesn't
+        repeatedly re-scan all rooms/devices. Post-sweep paths call refresh() directly.
+        """
+
+        if time.monotonic() - self._last_refresh_ts >= _REFRESH_THROTTLE_S:
+            self.refresh()
 
     def set_sweeping(self, sweeping: bool) -> None:
         """Reflect an in-progress estate sweep — delegated to the shared top bar."""

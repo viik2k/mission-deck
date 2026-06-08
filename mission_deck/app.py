@@ -125,6 +125,9 @@ class RoomButton(ctk.CTkButton):
 
     def __init__(self, master, room: Room, command):
         self.room = room
+        self._search_haystack = (
+            f"{room.name} {room.city} {room.location} {room.id}"
+        ).lower()
         self._selected = False
         cls = type(self)
         if cls._font_normal is None:
@@ -481,7 +484,7 @@ class CityGroup(ctk.CTkFrame):
         self.set_collapsed(False)  # builds + shows
         self.grid()
         for btn in self.buttons:
-            match = query in self._haystack(btn.room)
+            match = query in btn._search_haystack
             btn._filtered_out = not match
             if match:
                 btn.grid()
@@ -1002,6 +1005,7 @@ class App(ctk.CTk):
         # Auto-refresh + config-switch state.
         self._auto_refresh_job: str | None = None
         self._statusbar_clear_job: str | None = None
+        self._search_debounce_job: str | None = None
         self.requested_config: Path | None = None
         # Dashboard / estate-wide sweep state. The sweep reuses the same
         # thread→queue→Tk-timer pattern as the room check, but on its own
@@ -1304,15 +1308,16 @@ class App(ctk.CTk):
         frame = self._frame_for(view)
         if frame is None:
             return
+        old_view = self._current_view
         for existing in self._view_frames.values():
             existing.grid_remove()
         frame.grid(row=0, column=0, sticky="nsew")
         self._current_view = view
         self._showing_dashboard = (view == "overview")
         if view == "overview":
-            self._ensure_overview().refresh()
+            self._ensure_overview().refresh_if_stale()
         self._update_topbar()
-        self._update_nav_highlight()
+        self._update_nav_highlight(old_view)
 
     def _frame_for(self, view: str) -> ctk.CTkFrame | None:
         if view == "rooms":
@@ -1513,6 +1518,25 @@ class App(ctk.CTk):
         self._room_subtitle.grid(row=1, column=0, sticky="w", pady=(1, 0))
         self._room_metrics = ctk.CTkFrame(head, fg_color="transparent")
         self._room_metrics.grid(row=2, column=0, sticky="w", pady=(8, 0))
+        self._metric_cells: list[tuple[ctk.CTkLabel, ctk.CTkLabel]] = []
+        for _index, (_val, _cap) in enumerate([
+            ("—", "24H UPTIME"), ("—", "ONLINE"), ("—", "OFFLINE"),
+            ("—", "WEB UIS"), ("—", "AVG LATENCY"),
+        ]):
+            _cell = ctk.CTkFrame(self._room_metrics, fg_color="transparent")
+            _cell.grid(row=0, column=_index, sticky="w", padx=(0, 22))
+            _v = ctk.CTkLabel(
+                _cell, text=_val, anchor="w",
+                font=ctk.CTkFont(size=15, weight="bold", family=FONT_MONO),
+                text_color=COLORS["text"],
+            )
+            _v.pack(anchor="w")
+            _c = ctk.CTkLabel(
+                _cell, text=_cap, anchor="w",
+                font=ctk.CTkFont(size=9), text_color=COLORS["text_faint"],
+            )
+            _c.pack(anchor="w")
+            self._metric_cells.append((_v, _c))
 
         self._grid = ctk.CTkScrollableFrame(detail, fg_color="transparent")
         self._grid.grid(row=1, column=0, sticky="nsew", padx=PAD, pady=(GAP, 0))
@@ -1687,8 +1711,6 @@ class App(ctk.CTk):
     def _render_room_metrics(self, room: Room) -> None:
         """Repaint the room-head metric strip (uptime / web UIs / latency / subnet)."""
 
-        for child in self._room_metrics.winfo_children():
-            child.destroy()
         online = sum(1 for d in room.devices if d.status is DeviceStatus.ONLINE)
         offline = sum(1 for d in room.devices if d.status is DeviceStatus.OFFLINE)
         web_count = len(room.web_devices())
@@ -1700,30 +1722,27 @@ class App(ctk.CTk):
             COLORS["online"] if (uptime or 0) >= 99 else
             COLORS["warn"] if uptime is not None else COLORS["text_faint"]
         )
-        metrics = [
-            (up_text, "24h uptime", up_color),
-            (str(online), "online", COLORS["online"] if online else COLORS["text_muted"]),
-            (str(offline), "offline", COLORS["offline"] if offline else COLORS["text_muted"]),
-            (str(web_count), "web UIs", COLORS["text"]),
-            (avg_lat, "avg latency", COLORS["text"]),
+        updates = [
+            (up_text,        up_color),
+            (str(online),    COLORS["online"]  if online  else COLORS["text_muted"]),
+            (str(offline),   COLORS["offline"] if offline else COLORS["text_muted"]),
+            (str(web_count), COLORS["text"]),
+            (avg_lat,        COLORS["text"]),
         ]
-        for index, (value, label, color) in enumerate(metrics):
-            cell = ctk.CTkFrame(self._room_metrics, fg_color="transparent")
-            cell.grid(row=0, column=index, sticky="w", padx=(0, 22))
-            ctk.CTkLabel(
-                cell, text=value, anchor="w",
-                font=ctk.CTkFont(size=15, weight="bold", family=FONT_MONO), text_color=color,
-            ).pack(anchor="w")
-            ctk.CTkLabel(
-                cell, text=label.upper(), anchor="w",
-                font=ctk.CTkFont(size=9), text_color=COLORS["text_faint"],
-            ).pack(anchor="w")
+        for (value_lbl, _cap_lbl), (value, color) in zip(self._metric_cells, updates):
+            value_lbl.configure(text=value, text_color=color)
 
     def _on_search_changed(self) -> None:
-        """Search typed: jump to Rooms (if needed) and filter the list."""
+        """Search typed: navigate to Rooms immediately, then debounce the filter."""
 
         if self._search_var.get().strip() and self._current_view != "rooms":
             self.navigate("rooms")
+        if self._search_debounce_job is not None:
+            self.after_cancel(self._search_debounce_job)
+        self._search_debounce_job = self.after(250, self._fire_search)
+
+    def _fire_search(self) -> None:
+        self._search_debounce_job = None
         self._filter_rooms()
 
     def _filter_rooms(self) -> None:
@@ -1737,9 +1756,7 @@ class App(ctk.CTk):
         else:
             visible = 0
             for btn in self._room_buttons:
-                room = btn.room
-                haystack = f"{room.name} {room.location} {room.id}".lower()
-                if not query or query in haystack:
+                if not query or query in btn._search_haystack:
                     btn.grid()
                     visible += 1
                 else:
@@ -1788,10 +1805,17 @@ class App(ctk.CTk):
 
         self.select_room(room)  # select_room → show_room_view → navigate("rooms")
 
-    def _update_nav_highlight(self) -> None:
+    def _update_nav_highlight(self, old_view: str | None = None) -> None:
         buttons = getattr(self, "_rail_buttons", None)
         if buttons:
-            for key, btn in buttons.items():
+            # Only reconfigure buttons whose state actually changed.
+            keys_to_update: set[str] = {self._current_view}
+            if old_view is not None:
+                keys_to_update.add(old_view)
+            for key in keys_to_update:
+                btn = buttons.get(key)
+                if btn is None:
+                    continue
                 active = key == self._current_view
                 name = self._rail_icon_names[key]
                 btn.configure(
