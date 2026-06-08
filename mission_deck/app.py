@@ -30,9 +30,12 @@ import customtkinter as ctk
 
 from mission_deck import __app_name__, __version__
 from mission_deck.browser import BrowserConfig, open_urls
+from mission_deck.cloud import CloudView
 from mission_deck.dashboard import DashboardView
 from mission_deck.history import HistoryStore, Sample
-from mission_deck.logging_setup import audit, setup_logging
+from mission_deck.icons import category_icon_name, icon
+from mission_deck.logging_setup import audit, current_user, setup_logging
+from mission_deck.plugins import PluginsView, plugin_by_id, spec_note, tile_plugins
 from mission_deck.controls import DeviceControl, controls_for
 from mission_deck.editors import (
     CommandEditorDialog,
@@ -65,16 +68,46 @@ from mission_deck.models import (
 from mission_deck.state import AppState
 from mission_deck.theme import (
     CORNER,
+    CORNER_LG,
+    FONT_MONO,
     GAP,
     GRID_COLUMNS,
     PAD,
+    RAIL_WIDTH,
     SIDEBAR_WIDTH,
+    TOPBAR_HEIGHT,
     COLORS,
     recording_status_color,
     recording_status_label,
     status_color,
     status_label,
 )
+
+# Always-present navigation entries for the icon rail: (key, label). The icon
+# name == key. Plugin-contributed tiles (e.g. Cloud Sync) are appended at
+# runtime when their plugin is activated — see App._apply_plugin_tiles.
+NAV_ITEMS: list[tuple[str, str]] = [
+    ("overview", "Overview"),
+    ("rooms", "Rooms"),
+    ("dashboards", "Dashboards"),
+    ("plugins", "Plugins"),
+]
+
+
+def command_count(device: Device) -> int:
+    cmds = device.extra.get("commands")
+    return len(cmds) if isinstance(cmds, list) else 0
+
+
+def _initials(name: str) -> str:
+    """Two-letter avatar initials from a login/user name."""
+
+    parts = [p for p in name.replace(".", " ").replace("_", " ").split() if p]
+    if not parts:
+        return "··"
+    if len(parts) == 1:
+        return parts[0][:2].upper()
+    return (parts[0][0] + parts[-1][0]).upper()
 
 logger = logging.getLogger(__name__)
 
@@ -176,78 +209,147 @@ class DeviceCard(ctk.CTkFrame):
         )
         self.device: Device | None = None
         self._click_cb = None  # set by the pool; called with the device on click
+        self.grid_columnconfigure(0, weight=1)
 
-        # Layout: [status dot] [text block .................]
-        self.grid_columnconfigure(1, weight=1)
+        # --- Top row: [icon tile] [name / model] [status dot] -------------- #
+        top = ctk.CTkFrame(self, fg_color="transparent")
+        top.grid(row=0, column=0, sticky="ew", padx=11, pady=(11, 0))
+        top.grid_columnconfigure(1, weight=1)
 
-        # Status indicator (a crisp coloured bullet we can recolour live).
-        self._dot = ctk.CTkLabel(
-            self, text="●", width=18, font=ctk.CTkFont(size=18),
-            text_color=status_color(DeviceStatus.UNKNOWN),
+        tile = ctk.CTkFrame(
+            top, width=30, height=30, corner_radius=7,
+            fg_color=COLORS["card_2"], border_width=1, border_color=COLORS["border"],
         )
-        self._dot.grid(row=0, column=0, rowspan=3, padx=(14, 8), pady=14, sticky="n")
+        tile.grid(row=0, column=0, rowspan=2, padx=(0, 9), sticky="n")
+        tile.grid_propagate(False)
+        self._icon = ctk.CTkLabel(tile, text="", image=icon("box", 17, COLORS["text_muted"]))
+        self._icon.place(relx=0.5, rely=0.5, anchor="center")
 
         self._name = ctk.CTkLabel(
-            self, text="", anchor="w",
-            font=ctk.CTkFont(size=14, weight="bold"), text_color=COLORS["text"],
+            top, text="", anchor="w",
+            font=ctk.CTkFont(size=12, weight="bold"), text_color=COLORS["text"],
         )
-        self._name.grid(row=0, column=1, sticky="ew", padx=(0, 14), pady=(14, 0))
+        self._name.grid(row=0, column=1, sticky="ew", pady=(1, 0))
+        self._model = ctk.CTkLabel(
+            top, text="", anchor="w",
+            font=ctk.CTkFont(size=11), text_color=COLORS["text_faint"],
+        )
+        self._model.grid(row=1, column=1, sticky="ew")
 
+        self._dot = ctk.CTkLabel(
+            top, text="●", width=14, font=ctk.CTkFont(size=13),
+            text_color=status_color(DeviceStatus.UNKNOWN),
+        )
+        self._dot.grid(row=0, column=2, sticky="ne")
+
+        # --- Meta row: [address] ........... [latency] --------------------- #
+        meta = ctk.CTkFrame(self, fg_color="transparent")
+        meta.grid(row=1, column=0, sticky="ew", padx=11, pady=(8, 0))
+        meta.grid_columnconfigure(0, weight=1)
+        self._addr = ctk.CTkLabel(
+            meta, text="", anchor="w",
+            font=ctk.CTkFont(size=11, family=FONT_MONO), text_color=COLORS["text_muted"],
+        )
+        self._addr.grid(row=0, column=0, sticky="w")
+        self._lat = ctk.CTkLabel(
+            meta, text="", anchor="e",
+            font=ctk.CTkFont(size=10, family=FONT_MONO), text_color=COLORS["text_faint"],
+        )
+        self._lat.grid(row=0, column=1, sticky="e")
+
+        # --- Foot row: [tags] ......... [web] [cmds] [rec] ----------------- #
+        foot = ctk.CTkFrame(self, fg_color="transparent")
+        foot.grid(row=2, column=0, sticky="ew", padx=11, pady=(7, 11))
+        foot.grid_columnconfigure(0, weight=1)
+        tags = ctk.CTkFrame(foot, fg_color="transparent")
+        tags.grid(row=0, column=0, sticky="w")
+        self._tags = [self._make_tag(tags) for _ in range(2)]
+
+        pills = ctk.CTkFrame(foot, fg_color="transparent")
+        pills.grid(row=0, column=1, sticky="e")
+        self._web_pill = ctk.CTkLabel(
+            pills, text=" web", image=icon("external", 12, COLORS["text_faint"]), compound="left",
+            font=ctk.CTkFont(size=10, family=FONT_MONO), text_color=COLORS["text_faint"],
+        )
+        self._cmd_pill = ctk.CTkLabel(
+            pills, text="", image=icon("command", 12, COLORS["text_faint"]), compound="left",
+            font=ctk.CTkFont(size=10, family=FONT_MONO), text_color=COLORS["text_faint"],
+        )
+        self._web_pill.pack(side="left", padx=(0, 8))
+        self._cmd_pill.pack(side="left")
         # Recording pill — only shown for Recorder devices (hidden otherwise).
         self._recording = ctk.CTkLabel(
-            self, text="", anchor="e",
-            font=ctk.CTkFont(size=11, weight="bold"),
+            foot, text="", anchor="e",
+            font=ctk.CTkFont(size=10, weight="bold"),
             text_color=recording_status_color(RecordingStatus.UNKNOWN),
         )
-        self._recording.grid(row=0, column=2, sticky="e", padx=(0, 14), pady=(14, 0))
-        self._recording.grid_remove()
-
-        self._subtitle = ctk.CTkLabel(
-            self, text="", anchor="w",
-            font=ctk.CTkFont(size=12), text_color=COLORS["text_muted"],
-        )
-        self._subtitle.grid(row=1, column=1, sticky="ew", padx=(0, 14))
-
-        self._meta = ctk.CTkLabel(
-            self, text="", anchor="w",
-            font=ctk.CTkFont(size=11, family="Consolas"), text_color=COLORS["text_faint"],
-        )
-        self._meta.grid(row=2, column=1, sticky="ew", padx=(0, 14), pady=(0, 14))
 
         # Hover affordance + click to open the device's control actions.
-        for widget in (self, self._dot, self._name, self._subtitle, self._meta, self._recording):
+        self._hover_targets = (
+            self, top, meta, foot, tile, self._icon, self._name, self._model,
+            self._addr, self._lat, self._dot,
+        )
+        for widget in self._hover_targets:
             widget.bind("<Enter>", self._on_enter)
             widget.bind("<Leave>", self._on_leave)
             widget.bind("<Button-1>", self._on_click)
             widget.configure(cursor="hand2")
 
+    @staticmethod
+    def _make_tag(master) -> ctk.CTkLabel:
+        return ctk.CTkLabel(
+            master, text="", corner_radius=4, height=18,
+            fg_color=COLORS["card_2"], text_color=COLORS["text_muted"],
+            font=ctk.CTkFont(size=10, family=FONT_MONO),
+        )
+
     def set_device(self, device: Device) -> None:
         """Rebind this (pooled) card to display ``device``."""
 
         self.device = device
-        subtitle = device.description
-        if device.category not in subtitle:
-            subtitle = f"{device.category} · {subtitle}" if subtitle else device.category
+        self._icon.configure(image=icon(category_icon_name(device.category), 17, COLORS["text_muted"]))
         self._name.configure(text=device.name)
-        self._subtitle.configure(text=subtitle)
+        self._model.configure(text=device.description)
+        self._addr.configure(text=device.address)
+        # Tag pills (up to two), reusing pooled labels.
+        for index, label in enumerate(self._tags):
+            if index < len(device.tags):
+                label.configure(text=f" {device.tags[index]} ")
+                label.pack(side="left", padx=(0, 5))
+            else:
+                label.pack_forget()
+        # Web + command pills.
+        if device.is_web_accessible:
+            self._web_pill.pack(side="left", padx=(0, 8))
+        else:
+            self._web_pill.pack_forget()
+        cmds = command_count(device)
+        if cmds:
+            self._cmd_pill.configure(text=f" {cmds}")
+            self._cmd_pill.pack(side="left")
+        else:
+            self._cmd_pill.pack_forget()
         self.refresh()
 
-    def _meta_text(self) -> str:
-        assert self.device is not None
-        proto = self.device.protocol.upper()
-        web = "  🌐" if self.device.is_web_accessible else ""
-        return (
-            f"{self.device.address}   {proto}   ·   "
-            f"{status_label(self.device.status)}{web}"
-        )
-
     def refresh(self) -> None:
-        """Repaint status-dependent bits (indicator colour + meta line)."""
+        """Repaint status-dependent bits (indicator colour, latency, border)."""
 
         if self.device is None:
             return
-        self._dot.configure(text_color=status_color(self.device.status))
-        self._meta.configure(text=self._meta_text())
+        status = self.device.status
+        self._dot.configure(text_color=status_color(status))
+        # Latency / timeout readout.
+        if self.device.last_latency_ms is not None:
+            self._lat.configure(text=f"{int(self.device.last_latency_ms)} ms")
+        elif status is DeviceStatus.OFFLINE:
+            self._lat.configure(text="— timeout")
+        else:
+            self._lat.configure(text="—")
+        # Offline devices get a red outline so they stand out in the grid.
+        self.configure(
+            border_color=COLORS["offline"] if status is DeviceStatus.OFFLINE
+            else COLORS["border"]
+        )
         # Recorders get a live recording-state pill; other devices hide it.
         if isinstance(self.device, Recorder):
             rec = self.device.recording_status
@@ -255,15 +357,19 @@ class DeviceCard(ctk.CTkFrame):
                 text=recording_status_label(rec),
                 text_color=recording_status_color(rec),
             )
-            self._recording.grid()
+            self._recording.grid(row=0, column=2, sticky="e", padx=(8, 0))
         else:
             self._recording.grid_remove()
 
     def _on_enter(self, _event=None) -> None:
-        self.configure(fg_color=COLORS["card_hover"])
+        self.configure(fg_color=COLORS["card_hover"], border_color=COLORS["border_strong"])
 
     def _on_leave(self, _event=None) -> None:
-        self.configure(fg_color=COLORS["card"])
+        offline = self.device is not None and self.device.status is DeviceStatus.OFFLINE
+        self.configure(
+            fg_color=COLORS["card"],
+            border_color=COLORS["offline"] if offline else COLORS["border"],
+        )
 
     def _on_click(self, _event=None) -> None:
         if self._click_cb is not None and self.device is not None:
@@ -401,24 +507,53 @@ class DeviceControlDialog(ctk.CTkToplevel):
         self.app = app
         self.device = device
         self.title(device.name)
-        self.configure(fg_color=COLORS["bg"])
-        self.geometry("440x540")
+        self.configure(fg_color=COLORS["panel"])
+        self.geometry("440x560")
         self.transient(app)
         self._status_clear_job: str | None = None
         self.grid_columnconfigure(0, weight=1)
 
+        # --- Drawer-style header: icon tile + name / category · room -------- #
+        head = ctk.CTkFrame(self, fg_color="transparent")
+        head.grid(row=0, column=0, sticky="ew", padx=PAD, pady=(PAD, 6))
+        head.grid_columnconfigure(1, weight=1)
+        tile = ctk.CTkFrame(
+            head, width=38, height=38, corner_radius=9,
+            fg_color=COLORS["card_2"], border_width=1, border_color=COLORS["border"],
+        )
+        tile.grid(row=0, column=0, rowspan=2, padx=(0, GAP), sticky="n")
+        tile.grid_propagate(False)
         ctk.CTkLabel(
-            self, text=device.name, anchor="w",
-            font=ctk.CTkFont(size=18, weight="bold"), text_color=COLORS["text"],
-        ).grid(row=0, column=0, sticky="ew", padx=PAD, pady=(PAD, 0))
+            tile, text="", image=icon(category_icon_name(device.category), 20, COLORS["text_muted"]),
+        ).place(relx=0.5, rely=0.5, anchor="center")
         ctk.CTkLabel(
-            self, text=f"{device.category} · {device.description}", anchor="w",
-            font=ctk.CTkFont(size=12), text_color=COLORS["text_muted"],
-        ).grid(row=1, column=0, sticky="ew", padx=PAD)
+            head, text=device.name, anchor="w",
+            font=ctk.CTkFont(size=15, weight="bold"), text_color=COLORS["text"],
+        ).grid(row=0, column=1, sticky="ew")
+        room_name = app.current_room.name if app.current_room else device.category
         ctk.CTkLabel(
-            self, text=f"{device.address}   {device.protocol.upper()}", anchor="w",
-            font=ctk.CTkFont(size=11, family="Consolas"), text_color=COLORS["text_faint"],
-        ).grid(row=2, column=0, sticky="ew", padx=PAD, pady=(0, GAP))
+            head, text=f"{device.category} · {room_name}", anchor="w",
+            font=ctk.CTkFont(size=11, family=FONT_MONO), text_color=COLORS["text_faint"],
+        ).grid(row=1, column=1, sticky="ew")
+
+        # Status / monitor chip row.
+        chips = ctk.CTkFrame(self, fg_color="transparent")
+        chips.grid(row=1, column=0, sticky="ew", padx=PAD, pady=(0, GAP))
+        ctk.CTkLabel(
+            chips, text=f"● {status_label(device.status)}",
+            font=ctk.CTkFont(size=12, weight="bold"), text_color=status_color(device.status),
+        ).pack(side="left", padx=(0, GAP))
+        monitor = device.extra.get("monitor", device.protocol)
+        ctk.CTkLabel(
+            chips, text=f" monitor: {monitor} ", corner_radius=4, height=20,
+            fg_color=COLORS["card_2"], text_color=COLORS["text_muted"],
+            font=ctk.CTkFont(size=10, family=FONT_MONO),
+        ).pack(side="left", padx=(0, 6))
+        ctk.CTkLabel(
+            chips, text=f" {device.protocol}://{device.address} ", corner_radius=4, height=20,
+            fg_color=COLORS["card_2"], text_color=COLORS["text_muted"],
+            font=ctk.CTkFont(size=10, family=FONT_MONO),
+        ).pack(side="left")
 
         self._actions = ctk.CTkScrollableFrame(self, fg_color="transparent")
         self._actions.grid(row=3, column=0, sticky="nsew", padx=PAD - 4, pady=0)
@@ -889,33 +1024,407 @@ class App(ctk.CTk):
         self.minsize(1000, 640)
         self.configure(fg_color=COLORS["bg"])
 
-        self.grid_columnconfigure(0, weight=0)  # sidebar (fixed)
-        self.grid_columnconfigure(1, weight=1)  # main panel (stretch)
+        self.grid_columnconfigure(0, weight=0)  # icon rail (fixed)
+        self.grid_columnconfigure(1, weight=1)  # main column (stretch)
         self.grid_rowconfigure(0, weight=1)
 
-        self._build_sidebar()
-        self._build_main_panel()
+        # View routing. Each rail entry maps to a frame swapped into the views
+        # container; ``_view_frames`` caches the lazily-built ones.
+        self._current_view = "rooms"
+        self._view_frames: dict[str, ctk.CTkFrame] = {}
+        self._plugins_view: PluginsView | None = None
+        self._cloud_view: CloudView | None = None
+        self._dashboards_view: ctk.CTkFrame | None = None
+
+        self._build_rail()
+        self._build_main_column()   # topbar + views container
+        self._build_rooms_view()    # the always-present default view
 
         # Select the first room so the room view is populated on launch.
         if self.site.rooms:
             self.select_room(self.site.rooms[0])
         else:
             self._show_empty_state()
+            self.navigate("rooms")
 
-        # Open on the dashboard unless the user turned that off.
+        # Land on the overview unless the user turned that off.
         if self.app_state.start_on_dashboard:
-            self.show_dashboard()
+            self.navigate("overview")
 
         # Honour saved auto-refresh + background-sweep preferences.
         self._reschedule_auto_refresh()
         self._reschedule_dashboard_poll()
 
     # ------------------------------------------------------------------ #
-    # Sidebar
+    # Icon rail (leftmost nav)
     # ------------------------------------------------------------------ #
+    def _build_rail(self) -> None:
+        rail = ctk.CTkFrame(self, width=RAIL_WIDTH, corner_radius=0, fg_color=COLORS["rail"])
+        rail.grid(row=0, column=0, sticky="nsew")
+        rail.grid_propagate(False)
+        rail.grid_columnconfigure(0, weight=1)
+        rail.grid_rowconfigure(2, weight=1)  # spacer between nav and footer
+
+        # Brand mark.
+        logo = ctk.CTkFrame(rail, width=34, height=34, corner_radius=9, fg_color=COLORS["accent"])
+        logo.grid(row=0, column=0, pady=(12, 14))
+        logo.grid_propagate(False)
+        ctk.CTkLabel(logo, text="", image=icon("logo", 19, "#ffffff")).place(
+            relx=0.5, rely=0.5, anchor="center")
+
+        # Nav buttons live in their own packed container so plugin tiles can be
+        # added/removed at runtime without disturbing the footer. Rail buttons
+        # carry image icons; ``_rail_icon_names`` lets the highlight logic
+        # re-tint them (a CTkImage can't be recoloured in place).
+        self._rail_buttons: dict[str, ctk.CTkButton] = {}
+        self._rail_icon_names: dict[str, str] = {}
+        nav = ctk.CTkFrame(rail, fg_color="transparent")
+        nav.grid(row=1, column=0, sticky="n")
+        self._rail_nav = nav
+        for key, _label in NAV_ITEMS:
+            self._add_rail_button(key)
+        # Tiles for plugins the operator has already activated.
+        self._apply_plugin_tiles()
+
+        # Footer: settings + user (config picker).
+        footer = ctk.CTkFrame(rail, fg_color="transparent")
+        footer.grid(row=3, column=0, sticky="s", pady=(0, 12))
+        settings_btn = self._rail_button(footer, "settings", self.open_settings)
+        settings_btn.pack(pady=3)
+        self._rail_buttons["settings"] = settings_btn
+        self._rail_icon_names["settings"] = "settings"
+        user_btn = self._rail_button(footer, "user", self.switch_config_dialog)
+        user_btn.pack(pady=3)
+        self._rail_buttons["user"] = user_btn
+        self._rail_icon_names["user"] = "user"
+
+    def _rail_button(self, master, icon_name: str, command) -> ctk.CTkButton:
+        return ctk.CTkButton(
+            master, text="", image=icon(icon_name, 21, COLORS["text_faint"]),
+            width=42, height=42, corner_radius=10,
+            fg_color="transparent", hover_color=COLORS["card"], command=command,
+        )
+
+    def _add_rail_button(self, key: str, icon_name: str | None = None) -> None:
+        """Add a navigable tile to the nav container (idempotent on ``key``)."""
+
+        if key in self._rail_buttons:
+            return
+        icon_name = icon_name or key
+        btn = self._rail_button(self._rail_nav, icon_name, lambda k=key: self.navigate(k))
+        btn.pack(pady=3)
+        self._rail_buttons[key] = btn
+        self._rail_icon_names[key] = icon_name
+
+    def _remove_rail_button(self, key: str) -> None:
+        btn = self._rail_buttons.pop(key, None)
+        if btn is not None:
+            btn.destroy()
+        self._rail_icon_names.pop(key, None)
+
+    def _apply_plugin_tiles(self) -> None:
+        """Ensure every enabled tile-providing plugin has a rail button."""
+
+        for spec in tile_plugins():
+            view_key, _label, icon_name = spec.tile
+            if self.is_plugin_enabled(spec.id):
+                self._add_rail_button(view_key, icon_name)
+            else:
+                self._remove_rail_button(view_key)
+
+    # ------------------------------------------------------------------ #
+    # Plugin activation (drives the rail tiles)
+    # ------------------------------------------------------------------ #
+    def is_plugin_enabled(self, plugin_id: str) -> bool:
+        spec = plugin_by_id(plugin_id)
+        if spec is not None and spec.builtin:
+            return True
+        return plugin_id in self.app_state.enabled_plugins
+
+    def set_plugin_enabled(self, plugin_id: str, enabled: bool) -> None:
+        """Activate/deactivate a plugin: persist it and sync its rail tile."""
+
+        spec = plugin_by_id(plugin_id)
+        if spec is None or spec.builtin:
+            return
+        if self.is_plugin_enabled(plugin_id) == enabled:
+            return
+        current = [p for p in self.app_state.enabled_plugins if p != plugin_id]
+        if enabled:
+            current.append(plugin_id)
+        self.app_state.enabled_plugins = sorted(current)
+        self.app_state.save()
+        audit("settings.change", plugin=plugin_id, enabled=enabled)
+
+        if spec.tile is not None:
+            view_key, _label, icon_name = spec.tile
+            if enabled:
+                self._add_rail_button(view_key, icon_name)
+            else:
+                # Leaving a now-hidden view: fall back to the Plugins screen.
+                if self._current_view == view_key:
+                    self.navigate("plugins")
+                self._remove_rail_button(view_key)
+        self._update_nav_highlight()
+
+    # ------------------------------------------------------------------ #
+    # Main column = top bar + swappable views
+    # ------------------------------------------------------------------ #
+    def _build_main_column(self) -> None:
+        main = ctk.CTkFrame(self, corner_radius=0, fg_color=COLORS["panel"])
+        main.grid(row=0, column=1, sticky="nsew")
+        main.grid_columnconfigure(0, weight=1)
+        main.grid_rowconfigure(1, weight=1)
+        self._main_column = main
+
+        self._build_topbar(main)
+
+        self._views = ctk.CTkFrame(main, corner_radius=0, fg_color=COLORS["panel"])
+        self._views.grid(row=1, column=0, sticky="nsew")
+        self._views.grid_columnconfigure(0, weight=1)
+        self._views.grid_rowconfigure(0, weight=1)
+
+    def _build_topbar(self, master) -> None:
+        bar = ctk.CTkFrame(
+            master, height=TOPBAR_HEIGHT, corner_radius=0, fg_color=COLORS["panel"],
+        )
+        bar.grid(row=0, column=0, sticky="ew")
+        bar.grid_propagate(False)
+        bar.grid_columnconfigure(0, weight=1)
+
+        self._crumb = ctk.CTkLabel(
+            bar, text="mission-deck", anchor="w",
+            font=ctk.CTkFont(size=13), text_color=COLORS["text_muted"],
+        )
+        self._crumb.grid(row=0, column=0, sticky="w", padx=(PAD, GAP))
+
+        # Global search — filters the room list (and jumps to Rooms when typed).
+        self._search_var = ctk.StringVar()
+        self._search_var.trace_add("write", lambda *_: self._on_search_changed())
+        ctk.CTkEntry(
+            bar, textvariable=self._search_var, width=260, height=32, corner_radius=CORNER,
+            placeholder_text="Search rooms, devices, IPs…",
+            border_width=1, border_color=COLORS["border"], fg_color=COLORS["card"],
+        ).grid(row=0, column=1, padx=(0, GAP), pady=10)
+
+        # Per-view action host: one frame per view, swapped on navigate.
+        self._action_host = ctk.CTkFrame(bar, fg_color="transparent")
+        self._action_host.grid(row=0, column=2, sticky="e", padx=(0, GAP))
+        self._build_room_actions(self._action_host)
+        self._build_overview_actions(self._action_host)
+
+        # Signed-in operator chip (the name every action is audited under).
+        user = current_user()
+        chip = ctk.CTkFrame(
+            bar, corner_radius=999, fg_color=COLORS["card"],
+            border_width=1, border_color=COLORS["border"],
+        )
+        chip.grid(row=0, column=3, sticky="e", padx=(0, PAD))
+        ctk.CTkLabel(
+            chip, text=_initials(user), width=24, height=24, corner_radius=12,
+            fg_color=COLORS["accent"], text_color="#ffffff",
+            font=ctk.CTkFont(size=11, weight="bold"),
+        ).pack(side="left", padx=(4, 6), pady=4)
+        ctk.CTkLabel(
+            chip, text=user, font=ctk.CTkFont(size=12), text_color=COLORS["text_muted"],
+        ).pack(side="left", padx=(0, 10))
+
+    def _build_room_actions(self, host) -> None:
+        frame = ctk.CTkFrame(host, fg_color="transparent")
+        self._room_actions = frame
+        self._check_btn = ctk.CTkButton(
+            frame, text="Check Status", image=icon("pulse", 16, "#ffffff"), compound="left",
+            width=130, height=32, corner_radius=CORNER,
+            fg_color=COLORS["accent"], hover_color=COLORS["accent_hover"],
+            font=ctk.CTkFont(size=13, weight="bold"), command=self.on_check_status,
+        )
+        self._check_btn.pack(side="right")
+        self._open_btn = ctk.CTkButton(
+            frame, text="Open Web UIs", image=icon("external", 16, COLORS["text"]), compound="left",
+            width=140, height=32, corner_radius=CORNER,
+            fg_color="transparent", hover_color=COLORS["card_hover"],
+            border_width=1, border_color=COLORS["border"], text_color=COLORS["text"],
+            font=ctk.CTkFont(size=13, weight="bold"), command=self.on_open_web_uis,
+        )
+        self._open_btn.pack(side="right", padx=(0, GAP))
+        self._add_device_btn = ctk.CTkButton(
+            frame, text="Device", image=icon("plus", 15, COLORS["text"]), compound="left",
+            width=86, height=32, corner_radius=CORNER,
+            fg_color="transparent", hover_color=COLORS["card_hover"],
+            border_width=1, border_color=COLORS["border"], text_color=COLORS["text"],
+            font=ctk.CTkFont(size=13), command=self.add_device,
+        )
+        self._add_device_btn.pack(side="right", padx=(0, GAP))
+        self._edit_room_btn = ctk.CTkButton(
+            frame, text="", image=icon("edit", 16, COLORS["text"]),
+            width=36, height=32, corner_radius=CORNER,
+            fg_color="transparent", hover_color=COLORS["card_hover"],
+            border_width=1, border_color=COLORS["border"], command=self.edit_current_room,
+        )
+        self._edit_room_btn.pack(side="right", padx=(0, GAP))
+        self._auto_var = ctk.BooleanVar(value=self.app_state.auto_refresh_enabled)
+        self._auto_switch = ctk.CTkSwitch(
+            frame, text="Auto", variable=self._auto_var, command=self.on_toggle_auto_refresh,
+            font=ctk.CTkFont(size=12), text_color=COLORS["text_muted"],
+        )
+        self._auto_switch.pack(side="right", padx=(0, GAP + 4))
+
+    def _build_overview_actions(self, host) -> None:
+        frame = ctk.CTkFrame(host, fg_color="transparent")
+        self._overview_actions = frame
+        self._ov_refresh_btn = ctk.CTkButton(
+            frame, text="Refresh All", image=icon("refresh", 16, "#ffffff"), compound="left",
+            width=130, height=32, corner_radius=CORNER,
+            fg_color=COLORS["accent"], hover_color=COLORS["accent_hover"],
+            font=ctk.CTkFont(size=13, weight="bold"), command=self.run_estate_sweep,
+        )
+        self._ov_refresh_btn.pack(side="right")
+        self._ov_auto_var = ctk.BooleanVar(value=self.app_state.dashboard_poll_enabled)
+        ctk.CTkSwitch(
+            frame, text="Auto", variable=self._ov_auto_var,
+            command=lambda: self.on_toggle_dashboard_poll(bool(self._ov_auto_var.get())),
+            font=ctk.CTkFont(size=12), text_color=COLORS["text_muted"],
+        ).pack(side="right", padx=(0, GAP + 4))
+        self._ov_sweep_label = ctk.CTkLabel(
+            frame, text="", anchor="e",
+            font=ctk.CTkFont(size=11), text_color=COLORS["text_faint"],
+        )
+        self._ov_sweep_label.pack(side="right", padx=(0, GAP + 4))
+
+    # ------------------------------------------------------------------ #
+    # View router
+    # ------------------------------------------------------------------ #
+    def navigate(self, view: str) -> None:
+        if view == "settings":
+            self.open_settings()
+            return
+        # The Cloud Sync screen only exists while its plugin is activated.
+        if view == "cloud" and not self.is_plugin_enabled("cloud_sync"):
+            view = "plugins"
+        frame = self._frame_for(view)
+        if frame is None:
+            return
+        for existing in self._view_frames.values():
+            existing.grid_remove()
+        frame.grid(row=0, column=0, sticky="nsew")
+        self._current_view = view
+        self._showing_dashboard = (view == "overview")
+        if view == "overview":
+            self._ensure_overview().refresh()
+        self._update_topbar()
+        self._update_nav_highlight()
+
+    def _frame_for(self, view: str) -> ctk.CTkFrame | None:
+        if view == "rooms":
+            return self._room_panel
+        if view == "overview":
+            return self._ensure_overview()
+        if view == "plugins":
+            return self._ensure_simple_view("plugins")
+        if view == "cloud":
+            return self._ensure_simple_view("cloud")
+        if view == "dashboards":
+            return self._ensure_simple_view("dashboards")
+        return None
+
+    def _ensure_overview(self) -> DashboardView:
+        if self._dashboard is None:
+            self._dashboard = DashboardView(self._views, self)
+            self._view_frames["overview"] = self._dashboard
+        return self._dashboard
+
+    def _ensure_simple_view(self, view: str) -> ctk.CTkFrame:
+        existing = self._view_frames.get(view)
+        if existing is not None:
+            return existing
+        if view == "plugins":
+            frame = PluginsView(self._views, self)
+        elif view == "cloud":
+            frame = CloudView(self._views, self)
+        else:
+            frame = self._build_dashboards_placeholder()
+        self._view_frames[view] = frame
+        return frame
+
+    def _build_dashboards_placeholder(self) -> ctk.CTkFrame:
+        frame = ctk.CTkScrollableFrame(self._views, fg_color="transparent")
+        frame.grid_columnconfigure(0, weight=1)
+        note = spec_note(
+            frame,
+            "Custom dashboards are user-composed from a widget palette bound to "
+            "live estate data (KPIs, gauges, device lists, latency series, recorder "
+            "state). Layouts persist per-user alongside settings in state.json.  "
+            "(Coming soon.)",
+        )
+        note.grid(row=0, column=0, sticky="ew", pady=(0, GAP))
+        placeholder = ctk.CTkFrame(
+            frame, corner_radius=CORNER_LG, fg_color=COLORS["card"],
+            border_width=1, border_color=COLORS["border"], height=280,
+        )
+        placeholder.grid(row=1, column=0, sticky="nsew")
+        ctk.CTkLabel(
+            placeholder, text="", image=icon("dashboards", 44, COLORS["ghost"]),
+        ).pack(pady=(70, 6))
+        ctk.CTkLabel(
+            placeholder, text="Composable dashboards are coming soon",
+            font=ctk.CTkFont(size=15, weight="bold"), text_color=COLORS["text"],
+        ).pack()
+        ctk.CTkLabel(
+            placeholder, text="Drag widgets from a palette to build estate-health, "
+            "recording-compliance, and network-latency views.",
+            font=ctk.CTkFont(size=12), text_color=COLORS["text_muted"],
+        ).pack(pady=(2, 0))
+        return frame
+
+    def _update_topbar(self) -> None:
+        titles = {
+            "overview": "Overview", "rooms": "Rooms", "dashboards": "Dashboards",
+            "plugins": "Plugins", "cloud": "Cloud Sync",
+        }
+        title = titles.get(self._current_view, "")
+        crumb = f"mission-deck     ›     {title}"
+        if self._current_view == "rooms" and self.current_room is not None:
+            crumb += f"     ›     {self.current_room.name}"
+        self._crumb.configure(text=crumb)
+        self._room_actions.grid_remove()
+        self._overview_actions.grid_remove()
+        if self._current_view == "rooms":
+            self._room_actions.grid(row=0, column=0, sticky="e")
+        elif self._current_view == "overview":
+            self._overview_actions.grid(row=0, column=0, sticky="e")
+            self._refresh_overview_sweep_label()
+
+    def _set_overview_sweeping(self, sweeping: bool) -> None:
+        """Reflect an in-progress estate sweep in the overview topbar controls."""
+
+        if sweeping:
+            self._ov_refresh_btn.configure(state="disabled", text="Sweeping…")
+            self._ov_sweep_label.configure(text="checking all rooms…")
+        else:
+            self._ov_refresh_btn.configure(state="normal", text="Refresh All")
+            self._refresh_overview_sweep_label()
+
+    def _refresh_overview_sweep_label(self) -> None:
+        ts = self.last_sweep_time
+        self._ov_sweep_label.configure(
+            text=f"last sweep {ts.strftime('%H:%M:%S')}" if ts else "no sweep yet"
+        )
+
+    # ------------------------------------------------------------------ #
+    # Rooms view (sidebar tree + room detail)
+    # ------------------------------------------------------------------ #
+    def _build_rooms_view(self) -> None:
+        panel = ctk.CTkFrame(self._views, corner_radius=0, fg_color=COLORS["panel"])
+        self._room_panel = panel
+        self._view_frames["rooms"] = panel
+        panel.grid_columnconfigure(1, weight=1)
+        panel.grid_rowconfigure(0, weight=1)
+        self._build_room_detail()   # column 1
+        self._build_sidebar()       # column 0 (rebuildable)
+
     def _build_sidebar(self) -> None:
-        # Allow a full rebuild after rooms are added/removed/renamed: tear down
-        # the previous sidebar and reset the per-build widget bookkeeping.
+        # Rebuildable after rooms are added/removed/renamed: tear down the
+        # previous sidebar and reset the per-build widget bookkeeping.
         existing = getattr(self, "_sidebar_frame", None)
         if existing is not None:
             existing.destroy()
@@ -925,94 +1434,43 @@ class App(ctk.CTk):
         self._selected_button = None
 
         sidebar = ctk.CTkFrame(
-            self,
-            width=SIDEBAR_WIDTH,
-            corner_radius=0,
-            fg_color=COLORS["sidebar"],
+            self._room_panel, width=SIDEBAR_WIDTH, corner_radius=0, fg_color=COLORS["sidebar"],
         )
         sidebar.grid(row=0, column=0, sticky="nsew")
         sidebar.grid_propagate(False)
-        sidebar.grid_rowconfigure(3, weight=1)  # room list expands
+        sidebar.grid_rowconfigure(2, weight=1)  # room list expands
+        sidebar.grid_columnconfigure(0, weight=1)
         self._sidebar_frame = sidebar
 
-        # Brand / title block.
-        brand = ctk.CTkFrame(sidebar, fg_color="transparent")
-        brand.grid(row=0, column=0, sticky="ew", padx=PAD, pady=(PAD + 4, 4))
-        ctk.CTkLabel(
-            brand,
-            text="mission-deck",
-            anchor="w",
-            font=ctk.CTkFont(size=20, weight="bold"),
-            text_color=COLORS["text"],
-        ).pack(anchor="w")
-        ctk.CTkLabel(
-            brand,
-            text="Courtroom AV Manager",
-            anchor="w",
-            font=ctk.CTkFont(size=12),
-            text_color=COLORS["text_faint"],
-        ).pack(anchor="w")
-
-        # Overview / dashboard entry — the estate-wide landing page, sitting just
-        # under the brand and above the room list.
-        self._overview_btn = ctk.CTkButton(
-            brand,
-            text="  ⌂  Overview",
-            anchor="w",
-            height=40,
-            corner_radius=CORNER,
-            fg_color="transparent",
-            hover_color=COLORS["card_hover"],
-            text_color=COLORS["text_muted"],
-            font=ctk.CTkFont(size=14, weight="bold"),
-            command=self.show_dashboard,
-        )
-        self._overview_btn.pack(anchor="w", fill="x", pady=(GAP, 0))
-
-        # "ROOMS" section label + count, with an Add Room (+) button.
+        # "ROOMS" header + count, with an Add Room (+) button.
         rooms_header = ctk.CTkFrame(sidebar, fg_color="transparent")
-        rooms_header.grid(row=1, column=0, sticky="ew", padx=PAD + 4, pady=(PAD, 6))
+        rooms_header.grid(row=0, column=0, sticky="ew", padx=PAD - 2, pady=(PAD - 4, 6))
         rooms_header.grid_columnconfigure(0, weight=1)
         self._rooms_label = ctk.CTkLabel(
-            rooms_header,
-            text=f"ROOMS  ({len(self.site.rooms)})",
-            anchor="w",
-            font=ctk.CTkFont(size=11, weight="bold"),
-            text_color=COLORS["text_faint"],
+            rooms_header, text=f"ROOMS  ({len(self.site.rooms)})", anchor="w",
+            font=ctk.CTkFont(size=11, weight="bold"), text_color=COLORS["text_faint"],
         )
         self._rooms_label.grid(row=0, column=0, sticky="ew")
         ctk.CTkButton(
-            rooms_header, text="＋ Add", width=58, height=24, corner_radius=CORNER,
+            rooms_header, text="＋", width=28, height=24, corner_radius=CORNER,
             fg_color="transparent", hover_color=COLORS["card_hover"],
             border_width=1, border_color=COLORS["border"], text_color=COLORS["text_muted"],
-            font=ctk.CTkFont(size=12), command=self.add_room,
+            font=ctk.CTkFont(size=13), command=self.add_room,
         ).grid(row=0, column=1, sticky="e")
 
-        # Search/filter box — essential once there are ~115 rooms.
-        self._search_var = ctk.StringVar()
-        self._search_var.trace_add("write", lambda *_: self._filter_rooms())
-        search = ctk.CTkEntry(
-            sidebar,
-            textvariable=self._search_var,
-            placeholder_text="Search rooms…",
-            height=34,
-            corner_radius=CORNER,
-            border_width=1,
-            border_color=COLORS["border"],
-            fg_color=COLORS["card"],
-        )
-        search.grid(row=2, column=0, sticky="ew", padx=PAD, pady=(0, 8))
+        # Sidebar-local search (shares the topbar's search variable).
+        ctk.CTkEntry(
+            sidebar, textvariable=self._search_var, placeholder_text="Filter rooms…",
+            height=32, corner_radius=CORNER, border_width=1,
+            border_color=COLORS["border"], fg_color=COLORS["card"],
+        ).grid(row=1, column=0, sticky="ew", padx=PAD - 2, pady=(0, 8))
 
         # Scrollable room list, grouped into collapsible city boxes.
-        room_list = ctk.CTkScrollableFrame(
-            sidebar, fg_color="transparent", corner_radius=0
-        )
-        room_list.grid(row=3, column=0, sticky="nsew", padx=PAD - 6)
+        room_list = ctk.CTkScrollableFrame(sidebar, fg_color="transparent", corner_radius=0)
+        room_list.grid(row=2, column=0, sticky="nsew", padx=(PAD - 8, PAD - 10))
         room_list.grid_columnconfigure(0, weight=1)
 
         if self.site.is_multi_city:
-            # One collapsible box per city (Melbourne, Sydney, …). Buttons are
-            # built lazily when a group is expanded — see CityGroup.
             for index, (city, rooms) in enumerate(self.site.grouped_by_city().items()):
                 group = CityGroup(room_list, city, rooms, self)
                 group.grid(row=index, column=0, sticky="ew", pady=(0, 6))
@@ -1020,175 +1478,50 @@ class App(ctk.CTk):
             if self._city_groups:
                 self._city_groups[0].set_collapsed(False)  # expand the first city
         else:
-            # No city info anywhere: flat list, no headers.
             for index, room in enumerate(self.site.rooms):
                 btn = RoomButton(room_list, room, command=self.select_room)
                 btn.grid(row=index, column=0, sticky="ew", pady=3)
                 self._room_buttons.append(btn)
                 self._room_button_index[room.id] = btn
 
-        # Footer: config source + version.
-        footer = ctk.CTkFrame(sidebar, fg_color="transparent")
-        footer.grid(row=4, column=0, sticky="ew", padx=PAD, pady=(6, PAD))
+        # Footer: config source.
         source = self.config_path.name if self.config_path else "example data"
         self._config_footer_label = ctk.CTkLabel(
-            footer,
-            text=f"config: {source}",
-            anchor="w",
-            font=ctk.CTkFont(size=11, family="Consolas"),
-            text_color=COLORS["text_faint"],
+            sidebar, text=f"config: {source}   ·   v{__version__}", anchor="w",
+            font=ctk.CTkFont(size=10, family=FONT_MONO), text_color=COLORS["text_faint"],
         )
-        self._config_footer_label.pack(anchor="w")
-        ctk.CTkLabel(
-            footer,
-            text=f"v{__version__}",
-            anchor="w",
-            font=ctk.CTkFont(size=11),
-            text_color=COLORS["text_faint"],
-        ).pack(anchor="w")
+        self._config_footer_label.grid(row=3, column=0, sticky="ew", padx=PAD - 2, pady=(6, PAD - 4))
 
-        # Restore the Overview highlight if the dashboard is the active view
-        # (the sidebar is rebuilt wholesale on room add/remove/rename).
-        self._update_nav_highlight()
+    def _build_room_detail(self) -> None:
+        detail = ctk.CTkFrame(self._room_panel, corner_radius=0, fg_color=COLORS["panel"])
+        detail.grid(row=0, column=1, sticky="nsew")
+        detail.grid_columnconfigure(0, weight=1)
+        detail.grid_rowconfigure(1, weight=1)
 
-    # ------------------------------------------------------------------ #
-    # Main panel
-    # ------------------------------------------------------------------ #
-    def _build_main_panel(self) -> None:
-        self._room_panel = panel = ctk.CTkFrame(self, corner_radius=0, fg_color=COLORS["panel"])
-        panel.grid(row=0, column=1, sticky="nsew")
-        panel.grid_columnconfigure(0, weight=1)
-        panel.grid_rowconfigure(1, weight=1)
-
-        # --- Header bar: room title + actions ------------------------------ #
-        header = ctk.CTkFrame(panel, corner_radius=0, fg_color=COLORS["header"], height=88)
-        header.grid(row=0, column=0, sticky="ew")
-        header.grid_propagate(False)
-        header.grid_columnconfigure(0, weight=1)
-
-        title_block = ctk.CTkFrame(header, fg_color="transparent")
-        title_block.grid(row=0, column=0, sticky="w", padx=PAD + 8, pady=PAD)
+        head = ctk.CTkFrame(detail, fg_color="transparent")
+        head.grid(row=0, column=0, sticky="ew", padx=PAD + 4, pady=(PAD, 4))
+        head.grid_columnconfigure(0, weight=1)
         self._room_title = ctk.CTkLabel(
-            title_block,
-            text="",
-            anchor="w",
-            font=ctk.CTkFont(size=22, weight="bold"),
-            text_color=COLORS["text"],
+            head, text="", anchor="w",
+            font=ctk.CTkFont(size=20, weight="bold"), text_color=COLORS["text"],
         )
-        self._room_title.pack(anchor="w")
+        self._room_title.grid(row=0, column=0, sticky="w")
         self._room_subtitle = ctk.CTkLabel(
-            title_block,
-            text="",
-            anchor="w",
-            font=ctk.CTkFont(size=13),
-            text_color=COLORS["text_muted"],
+            head, text="", anchor="w",
+            font=ctk.CTkFont(size=12), text_color=COLORS["text_muted"],
         )
-        self._room_subtitle.pack(anchor="w")
+        self._room_subtitle.grid(row=1, column=0, sticky="w", pady=(1, 0))
+        self._room_metrics = ctk.CTkFrame(head, fg_color="transparent")
+        self._room_metrics.grid(row=2, column=0, sticky="w", pady=(8, 0))
 
-        actions = ctk.CTkFrame(header, fg_color="transparent")
-        actions.grid(row=0, column=1, sticky="e", padx=PAD + 8, pady=PAD)
-        # Primary action (rightmost): live status check.
-        self._check_btn = ctk.CTkButton(
-            actions,
-            text="Check Status",
-            width=140,
-            height=40,
-            corner_radius=CORNER,
-            fg_color=COLORS["accent"],
-            hover_color=COLORS["accent_hover"],
-            font=ctk.CTkFont(size=14, weight="bold"),
-            command=self.on_check_status,
-        )
-        self._check_btn.pack(side="right")
-        # Headline feature: open every web UI in the room (secondary style).
-        self._open_btn = ctk.CTkButton(
-            actions,
-            text="Open Web UIs",
-            width=150,
-            height=40,
-            corner_radius=CORNER,
-            fg_color="transparent",
-            hover_color=COLORS["card_hover"],
-            border_width=1,
-            border_color=COLORS["border"],
-            text_color=COLORS["text"],
-            font=ctk.CTkFont(size=14, weight="bold"),
-            command=self.on_open_web_uis,
-        )
-        self._open_btn.pack(side="right", padx=(0, GAP))
-        # Add a device to / edit the current room (config-writing actions).
-        self._add_device_btn = ctk.CTkButton(
-            actions,
-            text="＋ Device",
-            width=110,
-            height=40,
-            corner_radius=CORNER,
-            fg_color="transparent",
-            hover_color=COLORS["card_hover"],
-            border_width=1,
-            border_color=COLORS["border"],
-            text_color=COLORS["text"],
-            font=ctk.CTkFont(size=14),
-            command=self.add_device,
-        )
-        self._add_device_btn.pack(side="right", padx=(0, GAP))
-        self._edit_room_btn = ctk.CTkButton(
-            actions,
-            text="✎",
-            width=40,
-            height=40,
-            corner_radius=CORNER,
-            fg_color="transparent",
-            hover_color=COLORS["card_hover"],
-            border_width=1,
-            border_color=COLORS["border"],
-            text_color=COLORS["text"],
-            font=ctk.CTkFont(size=16),
-            command=self.edit_current_room,
-        )
-        self._edit_room_btn.pack(side="right", padx=(0, GAP))
-        # Settings gear (far left of the action cluster).
-        self._settings_btn = ctk.CTkButton(
-            actions,
-            text="⚙",
-            width=40,
-            height=40,
-            corner_radius=CORNER,
-            fg_color="transparent",
-            hover_color=COLORS["card_hover"],
-            border_width=1,
-            border_color=COLORS["border"],
-            text_color=COLORS["text"],
-            font=ctk.CTkFont(size=16),
-            command=self.open_settings,
-        )
-        self._settings_btn.pack(side="right", padx=(0, GAP))
-        # Auto-refresh toggle.
-        self._auto_var = ctk.BooleanVar(value=self.app_state.auto_refresh_enabled)
-        self._auto_switch = ctk.CTkSwitch(
-            actions,
-            text="Auto",
-            variable=self._auto_var,
-            command=self.on_toggle_auto_refresh,
-            font=ctk.CTkFont(size=12),
-            text_color=COLORS["text_muted"],
-        )
-        self._auto_switch.pack(side="right", padx=(0, GAP + 4))
-
-        # --- Scrollable device grid ---------------------------------------- #
-        self._grid = ctk.CTkScrollableFrame(panel, fg_color="transparent")
-        self._grid.grid(row=1, column=0, sticky="nsew", padx=PAD, pady=PAD)
+        self._grid = ctk.CTkScrollableFrame(detail, fg_color="transparent")
+        self._grid.grid(row=1, column=0, sticky="nsew", padx=PAD, pady=(GAP, 0))
         for col in range(GRID_COLUMNS):
             self._grid.grid_columnconfigure(col, weight=1, uniform="cards")
 
-        # --- Status / toast line ------------------------------------------- #
         self._statusbar = ctk.CTkLabel(
-            panel,
-            text="",
-            anchor="w",
-            height=28,
-            font=ctk.CTkFont(size=12),
-            text_color=COLORS["text_faint"],
+            detail, text="", anchor="w", height=26,
+            font=ctk.CTkFont(size=12), text_color=COLORS["text_faint"],
         )
         self._statusbar.grid(row=2, column=0, sticky="ew", padx=PAD + 8, pady=(0, 8))
 
@@ -1238,10 +1571,13 @@ class App(ctk.CTk):
                     break
 
     def _render_room(self, room: Room) -> None:
-        # Header text.
+        # Header text + breadcrumb.
         self._room_title.configure(text=room.name)
-        bits = [b for b in (room.location, f"{room.device_count} devices") if b]
+        bits = [b for b in (room.city, room.location, f"{room.device_count} devices") if b]
         self._room_subtitle.configure(text="   ·   ".join(bits))
+        self._render_room_metrics(room)
+        if self._current_view == "rooms":
+            self._update_topbar()
 
         # A room is selected: room-scoped editing actions are available.
         self._edit_room_btn.configure(state="normal")
@@ -1251,7 +1587,7 @@ class App(ctk.CTk):
         # Web-UI action: reflect how many devices are openable in this room.
         web_count = len(room.web_devices())
         if web_count:
-            self._open_btn.configure(text=f"Open Web UIs  ({web_count})", state="normal")
+            self._open_btn.configure(text=f"Open Web UIs ({web_count})", state="normal")
         else:
             self._open_btn.configure(text="Open Web UIs", state="disabled")
 
@@ -1348,9 +1684,53 @@ class App(ctk.CTk):
             self._empty_hint = hint
         return hint
 
+    def _render_room_metrics(self, room: Room) -> None:
+        """Repaint the room-head metric strip (uptime / web UIs / latency / subnet)."""
+
+        for child in self._room_metrics.winfo_children():
+            child.destroy()
+        online = sum(1 for d in room.devices if d.status is DeviceStatus.ONLINE)
+        offline = sum(1 for d in room.devices if d.status is DeviceStatus.OFFLINE)
+        web_count = len(room.web_devices())
+        lats = [d.last_latency_ms for d in room.devices if d.last_latency_ms is not None]
+        avg_lat = f"{int(sum(lats) / len(lats))} ms" if lats else "—"
+        uptime = self.history.room_uptime(room.id, 24 * 3600)
+        up_text = f"{uptime:.1f}%" if uptime is not None else "—"
+        up_color = (
+            COLORS["online"] if (uptime or 0) >= 99 else
+            COLORS["warn"] if uptime is not None else COLORS["text_faint"]
+        )
+        metrics = [
+            (up_text, "24h uptime", up_color),
+            (str(online), "online", COLORS["online"] if online else COLORS["text_muted"]),
+            (str(offline), "offline", COLORS["offline"] if offline else COLORS["text_muted"]),
+            (str(web_count), "web UIs", COLORS["text"]),
+            (avg_lat, "avg latency", COLORS["text"]),
+        ]
+        for index, (value, label, color) in enumerate(metrics):
+            cell = ctk.CTkFrame(self._room_metrics, fg_color="transparent")
+            cell.grid(row=0, column=index, sticky="w", padx=(0, 22))
+            ctk.CTkLabel(
+                cell, text=value, anchor="w",
+                font=ctk.CTkFont(size=15, weight="bold", family=FONT_MONO), text_color=color,
+            ).pack(anchor="w")
+            ctk.CTkLabel(
+                cell, text=label.upper(), anchor="w",
+                font=ctk.CTkFont(size=9), text_color=COLORS["text_faint"],
+            ).pack(anchor="w")
+
+    def _on_search_changed(self) -> None:
+        """Search typed: jump to Rooms (if needed) and filter the list."""
+
+        if self._search_var.get().strip() and self._current_view != "rooms":
+            self.navigate("rooms")
+        self._filter_rooms()
+
     def _filter_rooms(self) -> None:
         """Filter sidebar rooms by the search box (name/city/location/id)."""
 
+        if not getattr(self, "_sidebar_frame", None):
+            return
         query = self._search_var.get().strip().lower()
         if self._city_groups:
             visible = sum(group.apply_filter(query) for group in self._city_groups)
@@ -1366,10 +1746,9 @@ class App(ctk.CTk):
                     btn.grid_remove()
 
         total = len(self._room_buttons)
-        if query:
-            self._rooms_label.configure(text=f"ROOMS  ({visible}/{total})")
-        else:
-            self._rooms_label.configure(text=f"ROOMS  ({total})")
+        label = getattr(self, "_rooms_label", None)
+        if label is not None:
+            label.configure(text=f"ROOMS  ({visible}/{total})" if query else f"ROOMS  ({total})")
 
     def _show_empty_state(self) -> None:
         self._room_title.configure(text="No rooms configured")
@@ -1392,46 +1771,38 @@ class App(ctk.CTk):
         self._update_statusbar()
 
     # ------------------------------------------------------------------ #
-    # View switching (dashboard ↔ room)
+    # View switching
     # ------------------------------------------------------------------ #
     def show_dashboard(self) -> None:
-        """Reveal the estate-wide overview, building it on first use."""
+        """Reveal the estate-wide overview (kept for callers/back-compat)."""
 
-        if self._dashboard is None:
-            self._dashboard = DashboardView(self, self)
-        self._room_panel.grid_remove()
-        self._dashboard.grid(row=0, column=1, sticky="nsew")
-        self._dashboard.refresh()
-        self._showing_dashboard = True
-        self._update_nav_highlight()
+        self.navigate("overview")
 
     def show_room_view(self) -> None:
-        """Reveal the per-room device panel (hiding the dashboard)."""
+        """Reveal the per-room device view."""
 
-        if self._dashboard is not None:
-            self._dashboard.grid_remove()
-        self._room_panel.grid(row=0, column=1, sticky="nsew")
-        self._showing_dashboard = False
-        self._update_nav_highlight()
+        self.navigate("rooms")
 
     def open_room_from_dashboard(self, room: Room) -> None:
         """Jump from a dashboard tile/row straight into that room's view."""
 
-        self.show_room_view()
-        self.select_room(room)
+        self.select_room(room)  # select_room → show_room_view → navigate("rooms")
 
     def _update_nav_highlight(self) -> None:
-        btn = getattr(self, "_overview_btn", None)
-        if btn is not None:
-            if self._showing_dashboard:
-                btn.configure(fg_color=COLORS["accent_soft"], text_color=COLORS["text"])
-            else:
-                btn.configure(fg_color="transparent", text_color=COLORS["text_muted"])
-        # The room-selection highlight belongs to the room view only. On the
-        # dashboard no room is "active", so visually clear it (keeping
+        buttons = getattr(self, "_rail_buttons", None)
+        if buttons:
+            for key, btn in buttons.items():
+                active = key == self._current_view
+                name = self._rail_icon_names[key]
+                btn.configure(
+                    fg_color=COLORS["accent_soft"] if active else "transparent",
+                    image=icon(name, 21, COLORS["accent_text"] if active else COLORS["text_faint"]),
+                )
+        # The room-selection highlight belongs to the room view only. Off the
+        # room view no room is "active", so visually clear it (keeping
         # ``_selected_button`` so the highlight is restored on the way back).
         if self._selected_button is not None:
-            self._selected_button.set_selected(not self._showing_dashboard)
+            self._selected_button.set_selected(self._current_view == "rooms")
 
     def _refresh_dashboard(self) -> None:
         """Repaint the dashboard if it exists (cheap no-op when never opened)."""
