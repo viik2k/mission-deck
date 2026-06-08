@@ -38,6 +38,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Callable
+from urllib.parse import quote
 
 from mission_deck.browser import BrowserConfig, open_urls
 from mission_deck.models import Device
@@ -66,6 +67,21 @@ def _format(template: str, device: Device, value: str | None) -> str:
         .replace("{host}", device.host)
         .replace("{port}", str(device.port))
         .replace("{value}", value or "")
+    )
+
+
+def _format_url(template: str, device: Device, value: str | None) -> str:
+    """Like _format but URL-encodes the {value} substitution.
+
+    Prevents a user-entered value from breaking the URL structure or injecting
+    extra path segments / query parameters.  {host} and {port} come from the
+    trusted config and are left as-is.
+    """
+    return (
+        template
+        .replace("{host}", device.host)
+        .replace("{port}", str(device.port))
+        .replace("{value}", quote(value or "", safe=""))
     )
 
 
@@ -110,7 +126,7 @@ def _make_command_control(device: Device, spec: dict) -> DeviceControl | None:
         def run(value: str | None, _tmpl=url_tmpl, _body=body_tmpl) -> str:
             body = _format(_body, device, value) if _body is not None else None
             return http_request(
-                _format(_tmpl, device, value),
+                _format_url(_tmpl, device, value),
                 method=method,
                 body=body,
                 timeout=float(spec.get("timeout", 5.0)),

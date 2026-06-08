@@ -29,6 +29,7 @@ import socket
 import ssl
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -255,6 +256,20 @@ def run_status_checks(
 # synchronous, and timeout-bounded — a single command at a time — and meant to
 # be executed off the UI thread by the app's background runner.
 
+def _assert_http_url(url: str) -> None:
+    """Raise ControlError if *url* doesn't use the http or https scheme.
+
+    Prevents file://, dict://, ftp:// and other schemes from being handed to
+    urllib and potentially reading local files or triggering unexpected handlers.
+    Called at the start of every outbound HTTP function.
+    """
+    scheme = urllib.parse.urlparse(url).scheme.lower()
+    if scheme not in ("http", "https"):
+        raise ControlError(
+            f"URL scheme {scheme!r} is not permitted; only http and https are allowed."
+        )
+
+
 def http_request(
     url: str,
     method: str = "GET",
@@ -277,6 +292,7 @@ def http_request(
                          codecs commonly present self-signed certs on the LAN).
     """
 
+    _assert_http_url(url)
     data = body.encode("utf-8", errors="replace") if body is not None else None
     request = urllib.request.Request(url, data=data, method=method.upper())
     for key, value in (headers or {}).items():
@@ -288,7 +304,9 @@ def http_request(
 
     context: ssl.SSLContext | None = None
     if not verify_tls:
-        context = ssl._create_unverified_context()
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        context.check_hostname = False
+        context.verify_mode = ssl.CERT_NONE
 
     logger.debug("HTTP %s %s (verify_tls=%s)", request.get_method(), url, verify_tls)
     try:
@@ -356,6 +374,10 @@ def fetch_recording_status(
     ``json_path`` example: ``"state.recording"`` navigates ``response["state"]["recording"]``.
     Returns UNKNOWN on any error (network, parse, unexpected value).
     """
+    scheme = urllib.parse.urlparse(url).scheme.lower()
+    if scheme not in ("http", "https"):
+        logger.debug("Recording status URL has disallowed scheme %r: %s", scheme, url)
+        return RecordingStatus.UNKNOWN
     try:
         with urllib.request.urlopen(url, timeout=timeout) as response:
             raw = response.read().decode("utf-8", errors="replace")

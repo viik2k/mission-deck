@@ -146,6 +146,13 @@ class Device:
                     f"missing or empty required string field {key!r}"
                 )
 
+        _raw_host = data["host"].strip()
+        if "://" in _raw_host or _raw_host.startswith("//") or "@" in _raw_host:
+            raise DeviceConfigError(
+                f"device {data['id']!r}: 'host' must be a plain hostname or IP address "
+                f"(remove any http:// prefix or @ character)."
+            )
+
         device_type = data["type"].strip().lower()
         target_cls = _DEVICE_REGISTRY.get(device_type, GenericDevice)
 

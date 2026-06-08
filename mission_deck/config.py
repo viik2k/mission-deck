@@ -275,6 +275,12 @@ def save_config(path: str | os.PathLike[str], data: dict[str, Any]) -> Path:
         target.parent.mkdir(parents=True, exist_ok=True)
         tmp.write_text(text, encoding="utf-8")
         os.replace(tmp, target)
+        # Config may contain device credentials — restrict to owner-only on POSIX.
+        if sys.platform != "win32":
+            try:
+                os.chmod(target, 0o600)
+            except OSError as exc:
+                logger.warning("Could not restrict permissions on %s: %s", target, exc)
     except OSError as exc:
         logger.error("Unable to save config '%s': %s", target, exc)
         try:

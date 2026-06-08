@@ -58,6 +58,49 @@ class AppState:
     history_retention_days: int = 30      # prune uptime samples older than this
 
     # ------------------------------------------------------------------ #
+    def __post_init__(self) -> None:
+        """Coerce and clamp fields that could be wrong types from a stale state.json."""
+        if self.ping_timeout_seconds is not None:
+            try:
+                self.ping_timeout_seconds = float(self.ping_timeout_seconds)
+            except (TypeError, ValueError):
+                self.ping_timeout_seconds = None
+        try:
+            self.max_concurrent_checks = max(0, int(self.max_concurrent_checks))
+        except (TypeError, ValueError):
+            self.max_concurrent_checks = 0
+        try:
+            self.auto_refresh_seconds = max(1, int(self.auto_refresh_seconds))
+        except (TypeError, ValueError):
+            self.auto_refresh_seconds = 60
+        try:
+            self.dashboard_poll_seconds = max(1, int(self.dashboard_poll_seconds))
+        except (TypeError, ValueError):
+            self.dashboard_poll_seconds = 120
+        try:
+            self.history_retention_days = max(1, int(self.history_retention_days))
+        except (TypeError, ValueError):
+            self.history_retention_days = 30
+        for attr in ("auto_refresh_enabled", "browser_new_window",
+                     "start_on_dashboard", "dashboard_poll_enabled"):
+            if not isinstance(getattr(self, attr), bool):
+                setattr(self, attr, bool(getattr(self, attr)))
+        if not isinstance(self.browser_path, str):
+            self.browser_path = ""
+        if self.last_config_path is not None and not isinstance(self.last_config_path, str):
+            self.last_config_path = None
+        if self.appearance not in ("dark", "light", "system"):
+            self.appearance = "dark"
+        if not isinstance(self.recent_configs, list):
+            self.recent_configs = []
+        else:
+            self.recent_configs = [str(r) for r in self.recent_configs if isinstance(r, str)][:8]
+        if not isinstance(self.enabled_plugins, list):
+            self.enabled_plugins = []
+        else:
+            self.enabled_plugins = [str(p) for p in self.enabled_plugins if isinstance(p, str)]
+
+    # ------------------------------------------------------------------ #
     @classmethod
     def load(cls) -> "AppState":
         path = state_path()

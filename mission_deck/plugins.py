@@ -74,20 +74,6 @@ PLUGINS: list[PluginSpec] = [
         desc="Treats any answered HTTP(S) endpoint as up. Opt in per device.",
         tags=["monitor"],
     ),
-    PluginSpec(
-        id="slack", name="Slack Alerts", by="community", icon="bell",
-        accent="#8a6fbf", badge="Coming soon",
-        desc="Post to a channel when a device goes offline or a sweep finds new "
-             "failures.",
-        tags=["notify"],
-    ),
-    PluginSpec(
-        id="snmp", name="SNMP Monitor", by="community", icon="server",
-        accent=COLORS["warn"], badge="Coming soon",
-        desc="Judge reachability and pull health OIDs from switches and matrix "
-             "hardware.",
-        tags=["monitor"],
-    ),
 ]
 
 _PLUGIN_COLUMNS = 2
