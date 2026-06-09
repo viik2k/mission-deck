@@ -131,17 +131,17 @@ class RoomButton(ctk.CTkButton):
         self._selected = False
         cls = type(self)
         if cls._font_normal is None:
-            cls._font_normal = ctk.CTkFont(size=14, weight="normal")
-            cls._font_bold = ctk.CTkFont(size=14, weight="bold")
+            cls._font_normal = ctk.CTkFont(size=11, family=FONT_MONO, weight="normal")
+            cls._font_bold   = ctk.CTkFont(size=11, family=FONT_MONO, weight="bold")
         super().__init__(
             master,
-            text=f"  {room.name}",
+            text=f"  {room.name.upper()}",
             anchor="w",
-            height=44,
+            height=40,
             corner_radius=CORNER,
             fg_color="transparent",
             hover_color=COLORS["card_hover"],
-            text_color=COLORS["text_muted"],
+            text_color=COLORS["text_faint"],
             font=cls._font_normal,
             command=lambda: command(room),
         )
@@ -176,15 +176,15 @@ class RoomButton(ctk.CTkButton):
         self._selected = selected
         if selected:
             self.configure(
-                fg_color=COLORS["accent_soft"],
+                fg_color="transparent",
                 text_color=COLORS["text"],
                 font=type(self)._font_bold,
             )
-            self._health_dot.configure(fg_color=COLORS["accent_soft"])
+            self._health_dot.configure(fg_color="transparent")
         else:
             self.configure(
                 fg_color="transparent",
-                text_color=COLORS["text_muted"],
+                text_color=COLORS["text_faint"],
                 font=type(self)._font_normal,
             )
             self._health_dot.configure(fg_color="transparent")
@@ -214,44 +214,37 @@ class DeviceCard(ctk.CTkFrame):
         self._click_cb = None  # set by the pool; called with the device on click
         self.grid_columnconfigure(0, weight=1)
 
-        # --- Top row: [icon tile] [name / model] [status dot] -------------- #
+        # --- Top row: [name] .............. [status dot] -------------------- #
         top = ctk.CTkFrame(self, fg_color="transparent")
-        top.grid(row=0, column=0, sticky="ew", padx=11, pady=(11, 0))
-        top.grid_columnconfigure(1, weight=1)
-
-        tile = ctk.CTkFrame(
-            top, width=30, height=30, corner_radius=7,
-            fg_color=COLORS["card_2"], border_width=1, border_color=COLORS["border"],
-        )
-        tile.grid(row=0, column=0, rowspan=2, padx=(0, 9), sticky="n")
-        tile.grid_propagate(False)
-        self._icon = ctk.CTkLabel(tile, text="", image=icon("box", 17, COLORS["text_muted"]))
-        self._icon.place(relx=0.5, rely=0.5, anchor="center")
+        top.grid(row=0, column=0, sticky="ew", padx=12, pady=(12, 0))
+        top.grid_columnconfigure(0, weight=1)
 
         self._name = ctk.CTkLabel(
             top, text="", anchor="w",
-            font=ctk.CTkFont(size=12, weight="bold"), text_color=COLORS["text"],
+            font=ctk.CTkFont(size=13, weight="bold"), text_color=COLORS["text"],
         )
-        self._name.grid(row=0, column=1, sticky="ew", pady=(1, 0))
+        self._name.grid(row=0, column=0, sticky="ew")
         self._model = ctk.CTkLabel(
             top, text="", anchor="w",
-            font=ctk.CTkFont(size=11), text_color=COLORS["text_faint"],
+            font=ctk.CTkFont(size=10, family=FONT_MONO), text_color=COLORS["text_faint"],
         )
-        self._model.grid(row=1, column=1, sticky="ew")
+        self._model.grid(row=1, column=0, sticky="ew")
 
         self._dot = ctk.CTkLabel(
-            top, text="●", width=14, font=ctk.CTkFont(size=13),
+            top, text="●", width=14, font=ctk.CTkFont(size=11),
             text_color=status_color(DeviceStatus.UNKNOWN),
         )
-        self._dot.grid(row=0, column=2, sticky="ne")
+        self._dot.grid(row=0, column=1, sticky="ne")
+        # Keep icon attribute alive for set_device compatibility; not rendered.
+        self._icon = self._dot
 
         # --- Meta row: [address] ........... [latency] --------------------- #
         meta = ctk.CTkFrame(self, fg_color="transparent")
-        meta.grid(row=1, column=0, sticky="ew", padx=11, pady=(8, 0))
+        meta.grid(row=1, column=0, sticky="ew", padx=12, pady=(6, 0))
         meta.grid_columnconfigure(0, weight=1)
         self._addr = ctk.CTkLabel(
             meta, text="", anchor="w",
-            font=ctk.CTkFont(size=11, family=FONT_MONO), text_color=COLORS["text_muted"],
+            font=ctk.CTkFont(size=11, family=FONT_MONO), text_color=COLORS["text"],
         )
         self._addr.grid(row=0, column=0, sticky="w")
         self._lat = ctk.CTkLabel(
@@ -262,7 +255,7 @@ class DeviceCard(ctk.CTkFrame):
 
         # --- Foot row: [tags] ......... [web] [cmds] [rec] ----------------- #
         foot = ctk.CTkFrame(self, fg_color="transparent")
-        foot.grid(row=2, column=0, sticky="ew", padx=11, pady=(7, 11))
+        foot.grid(row=2, column=0, sticky="ew", padx=12, pady=(6, 12))
         foot.grid_columnconfigure(0, weight=1)
         tags = ctk.CTkFrame(foot, fg_color="transparent")
         tags.grid(row=0, column=0, sticky="w")
@@ -271,25 +264,25 @@ class DeviceCard(ctk.CTkFrame):
         pills = ctk.CTkFrame(foot, fg_color="transparent")
         pills.grid(row=0, column=1, sticky="e")
         self._web_pill = ctk.CTkLabel(
-            pills, text=" web", image=icon("external", 12, COLORS["text_faint"]), compound="left",
-            font=ctk.CTkFont(size=10, family=FONT_MONO), text_color=COLORS["text_faint"],
+            pills, text="WEB",
+            font=ctk.CTkFont(size=9, family=FONT_MONO), text_color=COLORS["text_faint"],
         )
         self._cmd_pill = ctk.CTkLabel(
-            pills, text="", image=icon("command", 12, COLORS["text_faint"]), compound="left",
-            font=ctk.CTkFont(size=10, family=FONT_MONO), text_color=COLORS["text_faint"],
+            pills, text="",
+            font=ctk.CTkFont(size=9, family=FONT_MONO), text_color=COLORS["text_faint"],
         )
         self._web_pill.pack(side="left", padx=(0, 8))
         self._cmd_pill.pack(side="left")
         # Recording pill — only shown for Recorder devices (hidden otherwise).
         self._recording = ctk.CTkLabel(
             foot, text="", anchor="e",
-            font=ctk.CTkFont(size=10, weight="bold"),
+            font=ctk.CTkFont(size=9, family=FONT_MONO, weight="bold"),
             text_color=recording_status_color(RecordingStatus.UNKNOWN),
         )
 
         # Hover affordance + click to open the device's control actions.
         self._hover_targets = (
-            self, top, meta, foot, tile, self._icon, self._name, self._model,
+            self, top, meta, foot, self._name, self._model,
             self._addr, self._lat, self._dot,
         )
         for widget in self._hover_targets:
@@ -301,23 +294,22 @@ class DeviceCard(ctk.CTkFrame):
     @staticmethod
     def _make_tag(master) -> ctk.CTkLabel:
         return ctk.CTkLabel(
-            master, text="", corner_radius=4, height=18,
-            fg_color=COLORS["card_2"], text_color=COLORS["text_muted"],
-            font=ctk.CTkFont(size=10, family=FONT_MONO),
+            master, text="", corner_radius=4, height=16,
+            fg_color="transparent", text_color=COLORS["text_faint"],
+            font=ctk.CTkFont(size=9, family=FONT_MONO),
         )
 
     def set_device(self, device: Device) -> None:
         """Rebind this (pooled) card to display ``device``."""
 
         self.device = device
-        self._icon.configure(image=icon(category_icon_name(device.category), 17, COLORS["text_muted"]))
         self._name.configure(text=device.name)
         self._model.configure(text=device.description)
         self._addr.configure(text=device.address)
         # Tag pills (up to two), reusing pooled labels.
         for index, label in enumerate(self._tags):
             if index < len(device.tags):
-                label.configure(text=f" {device.tags[index]} ")
+                label.configure(text=f" {device.tags[index].upper()} ")
                 label.pack(side="left", padx=(0, 5))
             else:
                 label.pack_forget()
@@ -328,7 +320,7 @@ class DeviceCard(ctk.CTkFrame):
             self._web_pill.pack_forget()
         cmds = command_count(device)
         if cmds:
-            self._cmd_pill.configure(text=f" {cmds}")
+            self._cmd_pill.configure(text=f"{cmds} CMD")
             self._cmd_pill.pack(side="left")
         else:
             self._cmd_pill.pack_forget()
@@ -410,12 +402,12 @@ class CityGroup(ctk.CTkFrame):
             self,
             text="",
             anchor="w",
-            height=34,
+            height=28,
             corner_radius=CORNER,
-            fg_color=COLORS["header"],
+            fg_color="transparent",
             hover_color=COLORS["card_hover"],
-            text_color=COLORS["text_muted"],
-            font=ctk.CTkFont(size=12, weight="bold"),
+            text_color=COLORS["text_faint"],
+            font=ctk.CTkFont(size=10, family=FONT_MONO, weight="bold"),
             command=self.toggle,
         )
         self._header.grid(row=0, column=0, sticky="ew")
@@ -442,7 +434,7 @@ class CityGroup(ctk.CTkFrame):
     def _update_header(self) -> None:
         chevron = "▸" if self.collapsed else "▾"
         count = self._filtered_visible if self._filtered_visible is not None else len(self.rooms)
-        self._header.configure(text=f"  {chevron}  {self.city}   ({count})")
+        self._header.configure(text=f"  {chevron}  {self.city.upper()}   ({count})")
 
     def toggle(self) -> None:
         self.set_collapsed(not self.collapsed)
@@ -569,16 +561,16 @@ class DeviceControlDialog(ctk.CTkToplevel):
         bar.grid(row=4, column=0, sticky="ew", padx=PAD, pady=(GAP, 0))
         bar.grid_columnconfigure(0, weight=1)
         ctk.CTkButton(
-            bar, text="Edit Device", width=110, command=self._edit_device,
+            bar, text="EDIT DEVICE", width=120, command=self._edit_device,
             fg_color="transparent", hover_color=COLORS["card_hover"],
-            border_width=1, border_color=COLORS["border"], text_color=COLORS["text"],
-            font=ctk.CTkFont(size=12),
+            border_width=1, border_color=COLORS["border_2"], text_color=COLORS["text_muted"],
+            font=ctk.CTkFont(size=11, family=FONT_MONO), corner_radius=999,
         ).grid(row=0, column=1, padx=(0, GAP))
         ctk.CTkButton(
-            bar, text="Remove", width=90, command=self._remove_device,
+            bar, text="REMOVE", width=90, command=self._remove_device,
             fg_color="transparent", hover_color=COLORS["card_hover"],
             border_width=1, border_color=COLORS["offline"], text_color=COLORS["offline"],
-            font=ctk.CTkFont(size=12),
+            font=ctk.CTkFont(size=11, family=FONT_MONO), corner_radius=999,
         ).grid(row=0, column=2)
 
         self._status = ctk.CTkLabel(
@@ -611,17 +603,19 @@ class DeviceControlDialog(ctk.CTkToplevel):
             line = ctk.CTkFrame(self._actions, fg_color="transparent")
             line.grid(row=row, column=0, sticky="ew", pady=4)
             line.grid_columnconfigure(0, weight=1)
+            is_primary_web = is_web and control.label.lower().startswith("open")
             ctk.CTkButton(
                 line,
-                text=control.label,
+                text=control.label.upper(),
                 height=40,
-                corner_radius=CORNER,
+                corner_radius=999,
                 anchor="w",
-                fg_color=COLORS["accent"] if is_web else COLORS["card"],
-                hover_color=COLORS["accent_hover"] if is_web else COLORS["card_hover"],
-                border_width=0 if is_web else 1,
-                border_color=COLORS["border"],
-                font=ctk.CTkFont(size=13, weight="bold"),
+                fg_color=COLORS["text"] if is_primary_web else "transparent",
+                hover_color=COLORS["text_muted"] if is_primary_web else COLORS["card_hover"],
+                text_color=COLORS["bg"] if is_primary_web else COLORS["text"],
+                border_width=0 if is_primary_web else 1,
+                border_color=COLORS["border_2"],
+                font=ctk.CTkFont(size=11, family=FONT_MONO, weight="bold"),
                 command=lambda c=control: self._run_control(c),
             ).grid(row=0, column=0, sticky="ew", padx=(8, 0))
             # Config-driven commands get an inline "edit" affordance.
@@ -642,10 +636,10 @@ class DeviceControlDialog(ctk.CTkToplevel):
 
         # Always-present "add a command" button at the end of the list.
         ctk.CTkButton(
-            self._actions, text="＋  Add Command", height=38, corner_radius=CORNER,
+            self._actions, text="+ ADD COMMAND", height=38, corner_radius=999,
             fg_color="transparent", hover_color=COLORS["card_hover"],
-            border_width=1, border_color=COLORS["accent"], text_color=COLORS["accent"],
-            font=ctk.CTkFont(size=13, weight="bold"),
+            border_width=1, border_color=COLORS["border_2"], text_color=COLORS["text_muted"],
+            font=ctk.CTkFont(size=11, family=FONT_MONO),
             command=self._add_command,
         ).grid(row=row, column=0, sticky="ew", padx=8, pady=(8, 4))
 
@@ -667,19 +661,19 @@ class DeviceControlDialog(ctk.CTkToplevel):
 
         if start_url:
             ctk.CTkButton(
-                self._actions, text="● Start Recording", height=40, corner_radius=CORNER,
-                anchor="w", fg_color=COLORS["card"], hover_color=COLORS["card_hover"],
+                self._actions, text="● START RECORDING", height=40, corner_radius=999,
+                anchor="w", fg_color="transparent", hover_color=COLORS["card_hover"],
                 border_width=1, border_color=COLORS["online"], text_color=COLORS["online"],
-                font=ctk.CTkFont(size=13, weight="bold"),
+                font=ctk.CTkFont(size=11, family=FONT_MONO, weight="bold"),
                 command=lambda u=start_url: self._recording_action(u, "Start Recording"),
             ).grid(row=row, column=0, sticky="ew", padx=8, pady=4)
             row += 1
         if stop_url:
             ctk.CTkButton(
-                self._actions, text="■ Stop Recording", height=40, corner_radius=CORNER,
-                anchor="w", fg_color=COLORS["card"], hover_color=COLORS["card_hover"],
+                self._actions, text="■ STOP RECORDING", height=40, corner_radius=999,
+                anchor="w", fg_color="transparent", hover_color=COLORS["card_hover"],
                 border_width=1, border_color=COLORS["offline"], text_color=COLORS["offline"],
-                font=ctk.CTkFont(size=13, weight="bold"),
+                font=ctk.CTkFont(size=11, family=FONT_MONO, weight="bold"),
                 command=lambda u=stop_url: self._recording_action(u, "Stop Recording"),
             ).grid(row=row, column=0, sticky="ew", padx=8, pady=4)
             row += 1
@@ -1197,8 +1191,8 @@ class App(ctk.CTk):
         bar.grid_columnconfigure(0, weight=1)
 
         self._crumb = ctk.CTkLabel(
-            bar, text="mission-deck", anchor="w",
-            font=ctk.CTkFont(size=13), text_color=COLORS["text_muted"],
+            bar, text="MISSION-DECK", anchor="w",
+            font=ctk.CTkFont(size=10, family=FONT_MONO), text_color=COLORS["text_faint"],
         )
         self._crumb.grid(row=0, column=0, sticky="w", padx=(PAD, GAP))
 
@@ -1237,33 +1231,35 @@ class App(ctk.CTk):
         frame = ctk.CTkFrame(host, fg_color="transparent")
         self._room_actions = frame
         self._check_btn = ctk.CTkButton(
-            frame, text="Check Status", image=icon("pulse", 16, "#ffffff"), compound="left",
-            width=130, height=32, corner_radius=CORNER,
-            fg_color=COLORS["accent"], hover_color=COLORS["accent_hover"],
-            font=ctk.CTkFont(size=13, weight="bold"), command=self.on_check_status,
+            frame, text="CHECK STATUS",
+            width=140, height=32, corner_radius=999,
+            fg_color=COLORS["text"], hover_color=COLORS["text_muted"],
+            text_color=COLORS["bg"],
+            font=ctk.CTkFont(size=11, family=FONT_MONO, weight="bold"), command=self.on_check_status,
         )
         self._check_btn.pack(side="right")
         self._open_btn = ctk.CTkButton(
-            frame, text="Open Web UIs", image=icon("external", 16, COLORS["text"]), compound="left",
-            width=140, height=32, corner_radius=CORNER,
+            frame, text="OPEN WEB UIS",
+            width=130, height=32, corner_radius=999,
             fg_color="transparent", hover_color=COLORS["card_hover"],
-            border_width=1, border_color=COLORS["border"], text_color=COLORS["text"],
-            font=ctk.CTkFont(size=13, weight="bold"), command=self.on_open_web_uis,
+            border_width=1, border_color=COLORS["border_2"], text_color=COLORS["text"],
+            font=ctk.CTkFont(size=11, family=FONT_MONO), command=self.on_open_web_uis,
         )
         self._open_btn.pack(side="right", padx=(0, GAP))
         self._add_device_btn = ctk.CTkButton(
-            frame, text="Device", image=icon("plus", 15, COLORS["text"]), compound="left",
-            width=86, height=32, corner_radius=CORNER,
+            frame, text="+ DEVICE",
+            width=90, height=32, corner_radius=999,
             fg_color="transparent", hover_color=COLORS["card_hover"],
-            border_width=1, border_color=COLORS["border"], text_color=COLORS["text"],
-            font=ctk.CTkFont(size=13), command=self.add_device,
+            border_width=1, border_color=COLORS["border_2"], text_color=COLORS["text_muted"],
+            font=ctk.CTkFont(size=11, family=FONT_MONO), command=self.add_device,
         )
         self._add_device_btn.pack(side="right", padx=(0, GAP))
         self._edit_room_btn = ctk.CTkButton(
-            frame, text="", image=icon("edit", 16, COLORS["text"]),
-            width=36, height=32, corner_radius=CORNER,
+            frame, text="EDIT",
+            width=48, height=32, corner_radius=999,
             fg_color="transparent", hover_color=COLORS["card_hover"],
-            border_width=1, border_color=COLORS["border"], command=self.edit_current_room,
+            border_width=1, border_color=COLORS["border_2"], text_color=COLORS["text_faint"],
+            font=ctk.CTkFont(size=10, family=FONT_MONO), command=self.edit_current_room,
         )
         self._edit_room_btn.pack(side="right", padx=(0, GAP))
         self._auto_var = ctk.BooleanVar(value=self.app_state.auto_refresh_enabled)
@@ -1277,10 +1273,11 @@ class App(ctk.CTk):
         frame = ctk.CTkFrame(host, fg_color="transparent")
         self._overview_actions = frame
         self._ov_refresh_btn = ctk.CTkButton(
-            frame, text="Refresh All", image=icon("refresh", 16, "#ffffff"), compound="left",
-            width=130, height=32, corner_radius=CORNER,
-            fg_color=COLORS["accent"], hover_color=COLORS["accent_hover"],
-            font=ctk.CTkFont(size=13, weight="bold"), command=self.run_estate_sweep,
+            frame, text="REFRESH ALL",
+            width=130, height=32, corner_radius=999,
+            fg_color=COLORS["text"], hover_color=COLORS["text_muted"],
+            text_color=COLORS["bg"],
+            font=ctk.CTkFont(size=11, family=FONT_MONO, weight="bold"), command=self.run_estate_sweep,
         )
         self._ov_refresh_btn.pack(side="right")
         self._ov_auto_var = ctk.BooleanVar(value=self.app_state.dashboard_poll_enabled)
@@ -1383,13 +1380,13 @@ class App(ctk.CTk):
 
     def _update_topbar(self) -> None:
         titles = {
-            "overview": "Overview", "rooms": "Rooms", "dashboards": "Dashboards",
-            "plugins": "Plugins", "cloud": "Cloud Sync",
+            "overview": "OVERVIEW", "rooms": "ROOMS", "dashboards": "DASHBOARDS",
+            "plugins": "PLUGINS", "cloud": "CLOUD SYNC",
         }
         title = titles.get(self._current_view, "")
-        crumb = f"mission-deck     ›     {title}"
+        crumb = f"MISSION-DECK  ›  {title}"
         if self._current_view == "rooms" and self.current_room is not None:
-            crumb += f"     ›     {self.current_room.name}"
+            crumb += f"  ›  {self.current_room.name.upper()}"
         self._crumb.configure(text=crumb)
         self._room_actions.grid_remove()
         self._overview_actions.grid_remove()
@@ -1403,10 +1400,10 @@ class App(ctk.CTk):
         """Reflect an in-progress estate sweep in the overview topbar controls."""
 
         if sweeping:
-            self._ov_refresh_btn.configure(state="disabled", text="Sweeping…")
+            self._ov_refresh_btn.configure(state="disabled", text="SWEEPING…")
             self._ov_sweep_label.configure(text="checking all rooms…")
         else:
-            self._ov_refresh_btn.configure(state="normal", text="Refresh All")
+            self._ov_refresh_btn.configure(state="normal", text="REFRESH ALL")
             self._refresh_overview_sweep_label()
 
     def _refresh_overview_sweep_label(self) -> None:

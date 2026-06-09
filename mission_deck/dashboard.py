@@ -62,7 +62,7 @@ _REFRESH_THROTTLE_S = 2.0
 # Small building blocks
 # --------------------------------------------------------------------------- #
 class StatTile(ctk.CTkFrame):
-    """One KPI tile: a big value over a caption, with an accent colour."""
+    """One KPI tile: a big mono value over an ALL CAPS caption."""
 
     def __init__(self, master, caption: str):
         super().__init__(
@@ -70,12 +70,13 @@ class StatTile(ctk.CTkFrame):
             border_width=1, border_color=COLORS["border"],
         )
         self._value = ctk.CTkLabel(
-            self, text="–", font=ctk.CTkFont(size=26, weight="bold"),
+            self, text="–", font=ctk.CTkFont(size=32, family="Consolas", weight="bold"),
             text_color=COLORS["text"],
         )
-        self._value.pack(anchor="w", padx=PAD, pady=(PAD - 2, 0))
+        self._value.pack(anchor="w", padx=PAD, pady=(PAD, 0))
         self._caption = ctk.CTkLabel(
-            self, text=caption, font=ctk.CTkFont(size=11), text_color=COLORS["text_muted"],
+            self, text=caption.upper(),
+            font=ctk.CTkFont(size=10, family="Consolas"), text_color=COLORS["text_faint"],
         )
         self._caption.pack(anchor="w", padx=PAD, pady=(0, PAD - 4))
 
@@ -85,8 +86,8 @@ class StatTile(ctk.CTkFrame):
 
 def _section_label(master, text: str) -> ctk.CTkLabel:
     return ctk.CTkLabel(
-        master, text=text, anchor="w",
-        font=ctk.CTkFont(size=13, weight="bold"), text_color=COLORS["text_muted"],
+        master, text=text.upper(), anchor="w",
+        font=ctk.CTkFont(size=10, family="Consolas", weight="bold"), text_color=COLORS["text_faint"],
     )
 
 
@@ -239,11 +240,11 @@ class DashboardView(ctk.CTkFrame):
             text.grid_columnconfigure(0, weight=1)
             ctk.CTkLabel(
                 text, text=device.name, anchor="w",
-                font=ctk.CTkFont(size=12, weight="bold"), text_color=COLORS["text"],
+                font=ctk.CTkFont(size=12), text_color=COLORS["text"],
             ).grid(row=0, column=0, sticky="ew")
             ctk.CTkLabel(
-                text, text=f"{room.name}   ·   {device.address}", anchor="w",
-                font=ctk.CTkFont(size=11, family="Consolas"), text_color=COLORS["text_faint"],
+                text, text=f"{room.name.upper()}   ·   {device.address}", anchor="w",
+                font=ctk.CTkFont(size=10, family="Consolas"), text_color=COLORS["text_faint"],
             ).grid(row=1, column=0, sticky="ew")
         if overflow > 0:
             _empty(self._attention, f"+ {overflow} more offline…")
