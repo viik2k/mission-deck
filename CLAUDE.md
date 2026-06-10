@@ -41,6 +41,7 @@ Each module has one job and strict constraints:
 | `dashboard.py` | Estate-wide overview view (KPIs, attention/uptime/recorder/activity panels) | Presentation only; reads `Site`/`HistoryStore`; no networking; UI thread |
 | `state.py` | Persisted user preferences + recent files | Best-effort JSON; never breaks app if corrupt |
 | `theme.py` | Colour and sizing constants | Pure constants, no logic |
+| `ui.py` | Cached shared fonts, button/switch style tokens, `PromptDialog` | All views use `ui.font()` (never raw `CTkFont`), the `BTN_*`/`SWITCH` tokens, and `PromptDialog` (never `CTkInputDialog`); cache resets per Tk root |
 | `logging_setup.py` | Centralised diagnostic + audit logging | Stdlib only; idempotent; never raises into callers |
 | `app.py` | CustomTkinter UI + event orchestration | Marshals network results to UI thread |
 

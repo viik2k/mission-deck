@@ -33,6 +33,7 @@ from mission_deck.models import (
 )
 from mission_deck.network import ControlError
 from mission_deck.theme import COLORS, CORNER, GAP, PAD
+from mission_deck.ui import font
 
 logger = logging.getLogger(__name__)
 
@@ -97,12 +98,12 @@ class _FormDialog(ctk.CTkToplevel):
         self._row += 1
         ctk.CTkLabel(
             frame, text=label, anchor="w",
-            font=ctk.CTkFont(size=13, weight="bold"), text_color=COLORS["text"],
+            font=font(13, weight="bold"), text_color=COLORS["text"],
         ).grid(row=0, column=0, sticky="w")
         if hint:
             ctk.CTkLabel(
                 frame, text=hint, anchor="w", justify="left",
-                font=ctk.CTkFont(size=11), text_color=COLORS["text_faint"],
+                font=font(11), text_color=COLORS["text_faint"],
             ).grid(row=1, column=0, sticky="w", pady=(0, 2))
         # Lets a caller that needs to show/hide a whole field grab its frame.
         self._last_field = frame
@@ -189,7 +190,7 @@ class _FormDialog(ctk.CTkToplevel):
         ctk.CTkButton(
             bar, text=save_text, width=110, command=on_save,
             fg_color=COLORS["accent"], hover_color=COLORS["accent_hover"],
-            font=ctk.CTkFont(size=13, weight="bold"),
+            font=font(13, weight="bold"),
         ).grid(row=0, column=2)
 
     def _error(self, message: str) -> None:
