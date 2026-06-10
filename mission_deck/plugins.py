@@ -28,6 +28,7 @@ from mission_deck.theme import (
     GAP,
     PAD,
 )
+from mission_deck.ui import font
 
 
 @dataclass(frozen=True)
@@ -105,7 +106,7 @@ def spec_note(master, text: str) -> ctk.CTkFrame:
     ).grid(row=0, column=0, padx=(12, 6), pady=10, sticky="n")
     ctk.CTkLabel(
         frame, text=text, anchor="w", justify="left", wraplength=1100,
-        font=ctk.CTkFont(size=12), text_color=COLORS["accent_text"],
+        font=font(12), text_color=COLORS["accent_text"],
     ).grid(row=0, column=1, sticky="ew", padx=(0, 12), pady=10)
     return frame
 
@@ -161,7 +162,7 @@ class PluginCard(ctk.CTkFrame):
         head.grid(row=0, column=1, sticky="ew", padx=(0, PAD), pady=(PAD, 0))
         ctk.CTkLabel(
             head, text=spec.name, anchor="w",
-            font=ctk.CTkFont(size=14, weight="bold"), text_color=COLORS["text"],
+            font=font(14, weight="bold"), text_color=COLORS["text"],
         ).pack(side="left")
         self._badge_pill(head, spec, enabled).pack(side="left", padx=(8, 0))
         if spec.builtin:
@@ -171,13 +172,13 @@ class PluginCard(ctk.CTkFrame):
 
         ctk.CTkLabel(
             self, text=f"by {spec.by}", anchor="w",
-            font=ctk.CTkFont(size=11, family="Consolas"), text_color=COLORS["text_faint"],
+            font=font(11, mono=True), text_color=COLORS["text_faint"],
         ).grid(row=1, column=1, sticky="ew", padx=(0, PAD))
 
         # Description.
         ctk.CTkLabel(
             self, text=spec.desc, anchor="w", justify="left", wraplength=380,
-            font=ctk.CTkFont(size=12), text_color=COLORS["text_muted"],
+            font=font(12), text_color=COLORS["text_muted"],
         ).grid(row=2, column=0, columnspan=2, sticky="ew", padx=PAD, pady=(GAP, PAD))
 
     def _badge_pill(self, master, spec: PluginSpec, enabled: bool) -> ctk.CTkLabel:
@@ -191,7 +192,7 @@ class PluginCard(ctk.CTkFrame):
             text, fg, tc = "Available", COLORS["accent_soft"], COLORS["accent_text"]
         return ctk.CTkLabel(
             master, text=f" {text} ", corner_radius=8, height=18,
-            font=ctk.CTkFont(size=10, weight="bold"), fg_color=fg, text_color=tc,
+            font=font(10, weight="bold"), fg_color=fg, text_color=tc,
         )
 
 
@@ -251,13 +252,13 @@ class PluginsView(ctk.CTkScrollableFrame):
         ).place(relx=0.5, rely=0.5, anchor="center")
         ctk.CTkLabel(
             hero, text="Extend mission-deck", anchor="w",
-            font=ctk.CTkFont(size=18, weight="bold"), text_color=COLORS["text"],
+            font=font(18, weight="bold"), text_color=COLORS["text"],
         ).grid(row=0, column=1, sticky="ew", padx=(0, PAD), pady=(PAD, 0))
         ctk.CTkLabel(
             hero, text="Activate a plugin to add monitors, notifiers and config "
             "sources. Tiles for what you turn on appear in the rail.",
             anchor="w", justify="left", wraplength=720,
-            font=ctk.CTkFont(size=12), text_color=COLORS["text_muted"],
+            font=font(12), text_color=COLORS["text_muted"],
         ).grid(row=1, column=1, sticky="ew", padx=(0, PAD), pady=(2, PAD))
         return hero
 

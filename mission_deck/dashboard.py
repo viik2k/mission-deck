@@ -45,6 +45,7 @@ from mission_deck.theme import (
     recording_status_label,
     status_color,
 )
+from mission_deck.ui import font
 
 # Trailing window the uptime panel summarises.
 UPTIME_WINDOW_SECONDS = 24 * 3600
@@ -70,13 +71,13 @@ class StatTile(ctk.CTkFrame):
             border_width=1, border_color=COLORS["border"],
         )
         self._value = ctk.CTkLabel(
-            self, text="–", font=ctk.CTkFont(size=32, family="Consolas", weight="bold"),
+            self, text="–", font=font(32, mono=True, weight="bold"),
             text_color=COLORS["text"],
         )
         self._value.pack(anchor="w", padx=PAD, pady=(PAD, 0))
         self._caption = ctk.CTkLabel(
             self, text=caption.upper(),
-            font=ctk.CTkFont(size=10, family="Consolas"), text_color=COLORS["text_faint"],
+            font=font(10, mono=True), text_color=COLORS["text_faint"],
         )
         self._caption.pack(anchor="w", padx=PAD, pady=(0, PAD - 4))
 
@@ -87,7 +88,7 @@ class StatTile(ctk.CTkFrame):
 def _section_label(master, text: str) -> ctk.CTkLabel:
     return ctk.CTkLabel(
         master, text=text.upper(), anchor="w",
-        font=ctk.CTkFont(size=10, family="Consolas", weight="bold"), text_color=COLORS["text_faint"],
+        font=font(10, mono=True, weight="bold"), text_color=COLORS["text_faint"],
     )
 
 
@@ -232,7 +233,7 @@ class DashboardView(ctk.CTkFrame):
                 command=lambda r=room: self.app.open_room_from_dashboard(r),
             )
             ctk.CTkLabel(
-                line, text="●", width=16, font=ctk.CTkFont(size=13),
+                line, text="●", width=16, font=font(13),
                 text_color=status_color(DeviceStatus.OFFLINE),
             ).grid(row=0, column=0, padx=(8, 6))
             text = ctk.CTkFrame(line, fg_color="transparent")
@@ -240,11 +241,11 @@ class DashboardView(ctk.CTkFrame):
             text.grid_columnconfigure(0, weight=1)
             ctk.CTkLabel(
                 text, text=device.name, anchor="w",
-                font=ctk.CTkFont(size=12), text_color=COLORS["text"],
+                font=font(12), text_color=COLORS["text"],
             ).grid(row=0, column=0, sticky="ew")
             ctk.CTkLabel(
                 text, text=f"{room.name.upper()}   ·   {device.address}", anchor="w",
-                font=ctk.CTkFont(size=10, family="Consolas"), text_color=COLORS["text_faint"],
+                font=font(10, mono=True), text_color=COLORS["text_faint"],
             ).grid(row=1, column=0, sticky="ew")
         if overflow > 0:
             _empty(self._attention, f"+ {overflow} more offline…")
@@ -277,15 +278,15 @@ class DashboardView(ctk.CTkFrame):
             text.grid_columnconfigure(0, weight=1)
             ctk.CTkLabel(
                 text, text=device.name, anchor="w",
-                font=ctk.CTkFont(size=12, weight="bold"), text_color=COLORS["text"],
+                font=font(12, weight="bold"), text_color=COLORS["text"],
             ).grid(row=0, column=0, sticky="ew")
             ctk.CTkLabel(
                 text, text=room.name, anchor="w",
-                font=ctk.CTkFont(size=11), text_color=COLORS["text_faint"],
+                font=font(11), text_color=COLORS["text_faint"],
             ).grid(row=1, column=0, sticky="ew")
             ctk.CTkLabel(
                 line, text=recording_status_label(device.recording_status),
-                font=ctk.CTkFont(size=11, weight="bold"),
+                font=font(11, weight="bold"),
                 text_color=recording_status_color(device.recording_status),
             ).grid(row=0, column=1, padx=(GAP, 10))
 
@@ -318,12 +319,12 @@ class DashboardView(ctk.CTkFrame):
             )
             ctk.CTkLabel(
                 line, text=room.name, anchor="w",
-                font=ctk.CTkFont(size=12), text_color=COLORS["text"],
+                font=font(12), text_color=COLORS["text"],
             ).grid(row=0, column=0, sticky="ew", padx=(8, GAP))
             _UptimeBar(line, pct).grid(row=0, column=1, padx=(0, 8))
             ctk.CTkLabel(
                 line, text="—" if pct is None else f"{pct:.0f}%", width=44, anchor="e",
-                font=ctk.CTkFont(size=12, weight="bold"),
+                font=font(12, weight="bold"),
                 text_color=_uptime_color(pct),
             ).grid(row=0, column=2, padx=(0, 10))
             line.grid_columnconfigure(0, weight=1)
@@ -347,11 +348,11 @@ class DashboardView(ctk.CTkFrame):
             line.grid_columnconfigure(0, weight=1)
             ctk.CTkLabel(
                 line, text=_event_summary(event), anchor="w",
-                font=ctk.CTkFont(size=12), text_color=COLORS["text"],
+                font=font(12), text_color=COLORS["text"],
             ).grid(row=0, column=0, sticky="ew")
             ctk.CTkLabel(
                 line, text=_event_time(event), anchor="e",
-                font=ctk.CTkFont(size=11, family="Consolas"), text_color=COLORS["text_faint"],
+                font=font(11, mono=True), text_color=COLORS["text_faint"],
             ).grid(row=0, column=1, padx=(GAP, 0))
 
 
@@ -394,7 +395,7 @@ def _clear(frame: ctk.CTkScrollableFrame) -> None:
 def _empty(frame: ctk.CTkScrollableFrame, text: str) -> None:
     ctk.CTkLabel(
         frame, text=text, anchor="w",
-        font=ctk.CTkFont(size=12), text_color=COLORS["text_muted"],
+        font=font(12), text_color=COLORS["text_muted"],
     ).grid(row=0, column=0, sticky="ew", padx=10, pady=10)
 
 
@@ -424,7 +425,7 @@ def _uptime_color(pct: float | None) -> str:
     if pct >= 99.0:
         return COLORS["online"]
     if pct >= 90.0:
-        return "#f59e0b"
+        return COLORS["warn"]
     return COLORS["offline"]
 
 

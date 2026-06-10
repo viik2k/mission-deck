@@ -25,6 +25,7 @@ from mission_deck.theme import (
     GAP,
     PAD,
 )
+from mission_deck.ui import font
 
 _FEATURES = [
     ("Multi-workstation", "Every operator PC loads one authoritative config — no "
@@ -75,13 +76,13 @@ class CloudView(ctk.CTkScrollableFrame):
         ).pack()
         ctk.CTkLabel(
             inner, text="Cloud Sync is coming soon", anchor="center",
-            font=ctk.CTkFont(size=18, weight="bold"), text_color=COLORS["text"],
+            font=font(18, weight="bold"), text_color=COLORS["text"],
         ).pack(pady=(10, 2))
         ctk.CTkLabel(
             inner, text="Sync config.json from OneDrive / SharePoint so every "
             "workstation loads the same estate.",
             anchor="center", justify="center", wraplength=520,
-            font=ctk.CTkFont(size=12), text_color=COLORS["text_muted"],
+            font=font(12), text_color=COLORS["text_muted"],
         ).pack()
 
         # The estate it would sync — real numbers from the loaded site.
@@ -95,7 +96,7 @@ class CloudView(ctk.CTkScrollableFrame):
         ctk.CTkLabel(
             chip, text=f"  {room_count} rooms · {device_count} devices ready to sync  ",
             image=icon("folder", 14, COLORS["text_muted"]), compound="left",
-            height=30, font=ctk.CTkFont(size=12, family="Consolas"),
+            height=30, font=font(12, mono=True),
             text_color=COLORS["text_muted"],
         ).pack(padx=PAD)
 
@@ -105,7 +106,7 @@ class CloudView(ctk.CTkScrollableFrame):
             compound="left", width=180, height=34, corner_radius=CORNER,
             fg_color=COLORS["card_2"], hover_color=COLORS["card_2"],
             border_width=1, border_color=COLORS["border"],
-            text_color=COLORS["text_faint"], font=ctk.CTkFont(size=13, weight="bold"),
+            text_color=COLORS["text_faint"], font=font(13, weight="bold"),
             state="disabled", command=lambda: None,
         ).grid(row=2, column=0, pady=(0, 46))
 
@@ -126,9 +127,9 @@ class CloudView(ctk.CTkScrollableFrame):
             )
             ctk.CTkLabel(
                 card, text=title, anchor="w",
-                font=ctk.CTkFont(size=13, weight="bold"), text_color=COLORS["text"],
+                font=font(13, weight="bold"), text_color=COLORS["text"],
             ).pack(anchor="w", padx=PAD, pady=(PAD, 2))
             ctk.CTkLabel(
                 card, text=desc, anchor="w", justify="left", wraplength=300,
-                font=ctk.CTkFont(size=12), text_color=COLORS["text_muted"],
+                font=font(12), text_color=COLORS["text_muted"],
             ).pack(anchor="w", padx=PAD, pady=(0, PAD))
