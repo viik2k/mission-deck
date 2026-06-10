@@ -8,7 +8,8 @@ room's equipment, check whether devices are online, watch estate-wide health and
 uptime at a glance, and **open all of a room's web UIs in the browser with one
 click** (the headline feature of the original tool).
 
-<img width="1916" height="1033" alt="image" src="https://github.com/user-attachments/assets/9b3b321f-e279-4460-8c01-cf508e6da5b3" />
+<img width="1919" height="1032" alt="image" src="https://github.com/user-attachments/assets/f01ed49a-90db-4a12-88f3-7f6cbbb6c331" />
+
 
 
 
