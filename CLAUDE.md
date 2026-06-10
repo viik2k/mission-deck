@@ -38,11 +38,16 @@ Each module has one job and strict constraints:
 | `controls.py` | Build per-device control action lists | Config-driven; delegates I/O to `network.py` |
 | `browser.py` | Open URLs in configured browser | Launches subprocess/webbrowser; no models |
 | `history.py` | Persisted uptime-history store (SQLite) | Stdlib `sqlite3` only; best-effort; never raises into callers |
-| `dashboard.py` | Estate-wide overview view (KPIs, attention/uptime/recorder/activity panels) | Presentation only; reads `Site`/`HistoryStore`; no networking; UI thread |
+| `dashboard.py` | Estate-wide overview view (flat report: stat strip + attention/recorders/uptime/activity sections) | Presentation only; reads `Site`/`HistoryStore`; no networking; UI thread |
+| `report.py` | Estate status report export (CSV: per-device status, latency, 24h uptime) | Pure data-out; no GUI/networking; UI picks the path and runs it off the Tk thread |
 | `state.py` | Persisted user preferences + recent files | Best-effort JSON; never breaks app if corrupt |
 | `theme.py` | Colour and sizing constants | Pure constants, no logic |
 | `ui.py` | Cached shared fonts, button/switch style tokens, `PromptDialog` | All views use `ui.font()` (never raw `CTkFont`), the `BTN_*`/`SWITCH` tokens, and `PromptDialog` (never `CTkInputDialog`); cache resets per Tk root |
 | `logging_setup.py` | Centralised diagnostic + audit logging | Stdlib only; idempotent; never raises into callers |
+| `icons.py` | Vector icon factory (CTkImage) | Presentation only |
+| `plugins.py` | Plugins screen + plugin catalogue (`PluginSpec`) | Presentation + static catalogue; activation state lives in `AppState` |
+| `cloud.py` | Cloud Sync view (config-source preview, plugin-gated) | Presentation only; no real Graph client yet |
+| `editors.py` | Room / device / command editor dialogs | Presentation; writes back through `App` save paths |
 | `app.py` | CustomTkinter UI + event orchestration | Marshals network results to UI thread |
 
 ### Data model hierarchy
@@ -65,8 +70,10 @@ How a device's reachability is judged is itself pluggable. `network.py` holds a
 `_MONITOR_REGISTRY` and a `@register_monitor("name")` decorator that mirrors
 `@register_device`. A *monitor* is `async (Device, float) -> CheckResult`.
 Built-ins: `tcp` (open a TCP connection — the historical default for every
-config) and `http`/`https` (any *answered* endpoint counts as up; URL comes from
-a `health_url` config key, else the device's `web_url`). `check_device()` is just
+config), `http`/`https` (any *answered* endpoint counts as up; URL comes from
+a `health_url` config key, else the device's `web_url`) and `ping`/`icmp` (one
+ICMP echo via the system ping binary — for devices with no open TCP port;
+on Windows a reply only counts when it carries a TTL). `check_device()` is just
 a dispatcher: a device opts into a monitor with a `"monitor"` config key,
 otherwise it falls back to `DEFAULT_MONITOR` (`tcp`). Add a new check type with a
 single decorator — no caller changes.
@@ -75,13 +82,18 @@ single decorator — no caller changes.
 
 The **Overview** (`dashboard.py`) is a second top-level view, swapped with the
 room panel in the same grid cell (`App.show_dashboard()` / `show_room_view()`;
-sidebar "⌂ Overview" button). It renders a KPI bar, an attention list, a
-recorders panel, an uptime panel, and a recent-activity feed
-(`logging_setup.tail_audit`). It is pure presentation: it reads live `Site` state
-+ the `HistoryStore` and calls back into `App`; it never touches the network
-itself. The destroy-and-rebuild list panels are guarded by content signatures
-and capped at `MAX_LIST_ROWS`, so a refresh whose data hasn't changed (or an
-estate with hundreds of offline devices) doesn't rebuild thousands of widgets.
+sidebar "⌂ Overview" button). It is deliberately **not** a bento grid of boxed
+cards: it renders as a flat, single-column report — a bare stat strip (rooms /
+devices / online / offline / healthy), then hairline-ruled sections for
+attention (offline devices), recorders, per-room 24h uptime and a
+recent-activity feed (`logging_setup.tail_audit`). It is pure presentation: it
+reads live `Site` state + the `HistoryStore` and calls back into `App`; it
+never touches the network itself. The destroy-and-rebuild list sections are
+guarded by content signatures and capped at `MAX_LIST_ROWS`, so a refresh whose
+data hasn't changed (or an estate with hundreds of offline devices) doesn't
+rebuild thousands of widgets. The overview topbar also offers **EXPORT** — a
+CSV status report via `report.py` (written off the Tk thread; audited as
+`report.export`).
 
 `App.run_estate_sweep()` probes **all** rooms (`site.all_devices()`) using the
 same worker/queue/`after()` pattern as a room check but on its own queue +
@@ -147,7 +159,7 @@ rotating streams to `<user_config_dir>/logs/` (override the directory with
 - **`audit.log`** — one JSON object per line recording operator actions
   (`device.command`, `room.open_web_uis`, `status_check.complete`,
   `status_check.estate`, `config.load`, `config.save`, `config.switch`,
-  `settings.change`, `app.start`/`app.stop`). Emit
+  `settings.change`, `report.export`, `app.start`/`app.stop`). Emit
   events with `logging_setup.audit(event, **fields)`; each line carries `ts`, `event`
   and `user`. The audit logger never propagates to the diagnostic handlers.
 

@@ -75,6 +75,13 @@ PLUGINS: list[PluginSpec] = [
         desc="Treats any answered HTTP(S) endpoint as up. Opt in per device.",
         tags=["monitor"],
     ),
+    PluginSpec(
+        id="monitor_ping", name="Ping (ICMP) Monitor", by="mission-deck core",
+        icon="pulse", accent=COLORS["warn"], builtin=True, badge="Built-in",
+        desc="One ICMP echo via the system ping command — for devices with no "
+             "open TCP port. Opt in per device with \"monitor\": \"ping\".",
+        tags=["monitor"],
+    ),
 ]
 
 _PLUGIN_COLUMNS = 2

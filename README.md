@@ -32,11 +32,13 @@ click** (the headline feature of the original tool).
   Audio DSPs, Displays, Document Cameras, Recorders, Video Matrix/Encoders/
   Decoders, Video Conferencing, …).
 - **Estate Overview** — a second top-level view (sidebar "⌂ Overview") that
-  answers "how is the whole estate right now?": KPI tiles (rooms, devices,
-  online, offline, healthy rooms), a "needs attention" list of offline devices,
-  an estate-wide recorders panel, per-room **uptime over the last 24h**, and a
-  recent-activity feed from the audit log. "Refresh All" sweeps every room at
-  once, and an optional background poll keeps it live.
+  answers "how is the whole estate right now?" as a flat, single-column report:
+  a headline stat strip (rooms, devices, online, offline, healthy rooms), a
+  "needs attention" list of offline devices, an estate-wide recorders section,
+  per-room **uptime over the last 24h**, and a recent-activity feed from the
+  audit log. "Refresh All" sweeps every room at once, an optional background
+  poll keeps it live, and **Export** saves the whole estate's status (per-device
+  status, latency, 24h uptime) as a CSV for handover/reporting.
 - **Uptime history** — every status check (per-room or estate-wide) is persisted
   to a local SQLite database, so the Overview can report real reachability
   percentages and trends rather than just a momentary snapshot.
@@ -48,9 +50,10 @@ click** (the headline feature of the original tool).
   Concurrency is bounded so an estate-wide sweep of thousands of devices never
   opens thousands of sockets at once.
 - **Pluggable monitors** — how a device's reachability is judged is itself a
-  registry: the default `tcp` monitor opens a TCP connection, while `http`/
-  `https` monitors treat any answered endpoint as up. A device opts in with a
-  `"monitor"` config key; new check types are one decorator away.
+  registry: the default `tcp` monitor opens a TCP connection, `http`/`https`
+  monitors treat any answered endpoint as up, and the `ping` monitor sends one
+  ICMP echo via the system ping (for devices with no open TCP port). A device
+  opts in with a `"monitor"` config key; new check types are one decorator away.
 - **Auto-refresh** — an optional toggle re-runs the status check for the current
   room on an interval, so the dashboard stays live hands-free.
 - **Device control** — click any device card to open its control panel. Actions
@@ -175,7 +178,7 @@ mission-deck looks for a config in this order (first match wins):
 | `tags` | no | List of strings |
 | `web_url` | no | Explicit web UI URL (overrides everything below) |
 | `web_protocol` / `web_port` / `web_path` | no | Build a web UI URL separately from the control port |
-| `monitor` | no | How reachability is judged: `tcp` (default), `http`, or `https` |
+| `monitor` | no | How reachability is judged: `tcp` (default), `http`, `https`, or `ping` |
 | `health_url` | no | URL the `http`/`https` monitor probes (else the device's `web_url`) |
 | `commands` | no | List of control actions (buttons) for the device — see below |
 
@@ -305,7 +308,8 @@ mission-deck/
     ├── controls.py          # per-device control actions (config-driven)
     ├── browser.py           # open web UIs in the configured browser
     ├── history.py           # persisted uptime-history store (SQLite)
-    ├── dashboard.py         # estate-wide Overview view (KPIs, uptime, activity)
+    ├── dashboard.py         # estate-wide Overview view (flat report: stats, uptime, activity)
+    ├── report.py            # estate status report export (CSV)
     ├── state.py             # remembered config + GUI-managed preferences
     ├── theme.py             # dark palette + sizing tokens
     ├── logging_setup.py     # diagnostic + audit logging configuration

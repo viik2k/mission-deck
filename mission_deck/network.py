@@ -25,8 +25,10 @@ import asyncio
 import base64
 import json
 import logging
+import re
 import socket
 import ssl
+import sys
 import time
 import urllib.error
 import urllib.parse
@@ -56,7 +58,8 @@ class CheckResult:
 # A *monitor* answers "is this device healthy right now?" and returns a
 # :class:`CheckResult`. The default ``tcp`` monitor opens a TCP connection (the
 # original behaviour); ``http`` issues a request and treats any answered
-# endpoint as up. New check types register with :func:`register_monitor` — the
+# endpoint as up; ``ping`` sends one ICMP echo via the system ping binary.
+# New check types register with :func:`register_monitor` — the
 # same extensibility seam as ``@register_device`` in ``models.py`` — and a
 # device opts in with a ``"monitor"`` key in its config (falling back to ``tcp``).
 MonitorFn = Callable[[Device, float], Awaitable[CheckResult]]
@@ -173,6 +176,62 @@ async def _http_monitor(device: Device, timeout: float) -> CheckResult:
 
     latency_ms = (time.perf_counter() - start) * 1000.0
     logger.debug("HTTP probe %s (%s) online in %.0fms", device.id, url, latency_ms)
+    return CheckResult(device.id, DeviceStatus.ONLINE, latency_ms, None)
+
+
+# "time=3ms" (Windows), "time<1ms" (Windows sub-millisecond), "time=0.42 ms" (POSIX).
+_PING_TIME_RE = re.compile(r"time[=<]\s*([\d.]+)\s*ms", re.IGNORECASE)
+
+
+@register_monitor("ping", "icmp")
+async def _ping_monitor(device: Device, timeout: float) -> CheckResult:
+    """Probe a device with one ICMP echo via the system ``ping`` binary.
+
+    For devices that answer ping but expose no TCP port worth connecting to
+    (printers, badge readers, anything behind a port-filtering firewall). Opt
+    in per device with ``"monitor": "ping"``. Raw ICMP sockets need elevation,
+    so this shells out to the OS ping — one echo, timeout-bounded — and parses
+    the reported round-trip time for latency.
+
+    On Windows ``ping`` exits 0 even for "Destination host unreachable"
+    replies relayed by a gateway, so a reply only counts when it carries a
+    TTL (i.e. it actually came from the target).
+    """
+
+    timeout_s = max(0.5, timeout)
+    if sys.platform == "win32":
+        args = ["ping", "-n", "1", "-w", str(int(timeout_s * 1000)), device.host]
+    else:
+        args = ["ping", "-c", "1", "-W", str(max(1, round(timeout_s))), device.host]
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *args,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+    except OSError as exc:  # ping binary missing/unrunnable
+        logger.debug("Ping probe %s could not start: %s", device.id, exc)
+        return CheckResult(device.id, DeviceStatus.UNKNOWN, None, f"ping unavailable: {exc}")
+
+    try:
+        # ping enforces its own timeout; the extra margin only guards a hung process.
+        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout_s + 2.0)
+    except asyncio.TimeoutError:
+        proc.kill()
+        logger.debug("Ping probe %s (%s) timed out after %.1fs", device.id, device.host, timeout_s)
+        return CheckResult(device.id, DeviceStatus.OFFLINE, None, "timed out")
+
+    output = stdout.decode("utf-8", errors="replace") if stdout else ""
+    reached = proc.returncode == 0
+    if sys.platform == "win32":
+        reached = reached and "ttl=" in output.lower()
+    if not reached:
+        logger.debug("Ping probe %s (%s) no reply (rc=%s)", device.id, device.host, proc.returncode)
+        return CheckResult(device.id, DeviceStatus.OFFLINE, None, "no ping reply")
+
+    match = _PING_TIME_RE.search(output)
+    latency_ms = float(match.group(1)) if match else None
+    logger.debug("Ping probe %s (%s) online (%s ms)", device.id, device.host, latency_ms)
     return CheckResult(device.id, DeviceStatus.ONLINE, latency_ms, None)
 
 
