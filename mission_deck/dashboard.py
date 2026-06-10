@@ -8,11 +8,15 @@ statuses the estate sweep keeps current) and the persisted
 for the few actions it offers (refresh, toggle background polling, jump to a
 room). It never touches the network or a worker thread itself.
 
-Sections
---------
-* **KPI bar** — headline counts (rooms, devices, online, offline, healthy rooms)
-  plus the last-sweep time.
-* **Attention list** — every device currently offline, with a jump-to link.
+Layout
+------
+A flat, full-width report — one column, reading top to bottom like an
+instrument panel printout. Sections are separated by hairline rules rather
+than boxed cards:
+
+* **Stat strip** — headline counts (rooms, devices, online, offline, healthy
+  rooms) as bare numbers, no tiles.
+* **Needs attention** — every device currently offline, with a jump-to link.
 * **Recorders** — recording state of every recorder estate-wide (court-critical).
 * **Uptime** — per-room reachability over the trailing 24h, worst first.
 * **Activity** — the tail of the audit log (recent operator actions).
@@ -35,7 +39,6 @@ from mission_deck.models import (
 )
 from mission_deck.theme import (
     COLORS,
-    CORNER,
     GAP,
     KPI_BAD,
     KPI_GOOD,
@@ -51,45 +54,65 @@ from mission_deck.ui import font
 UPTIME_WINDOW_SECONDS = 24 * 3600
 # Activity feed length.
 ACTIVITY_LIMIT = 18
-# Cap how many rows the attention / recorders lists render. Past this an estate
-# can have hundreds of entries; rendering them all builds hundreds of widgets and
-# scrolls forever. We show the worst N and summarise the rest in a footer.
+# Cap how many rows the attention / recorders / uptime sections render. Past
+# this an estate can have hundreds of entries; rendering them all builds
+# hundreds of widgets and scrolls forever. We show the worst N and summarise
+# the rest in a footer.
 MAX_LIST_ROWS = 200
 # Minimum seconds between navigate-triggered dashboard refreshes.
 _REFRESH_THROTTLE_S = 2.0
+
+# Hover corner for flat rows — just enough rounding to read as a highlight.
+_ROW_CORNER = 6
 
 
 # --------------------------------------------------------------------------- #
 # Small building blocks
 # --------------------------------------------------------------------------- #
-class StatTile(ctk.CTkFrame):
-    """One KPI tile: a big mono value over an ALL CAPS caption."""
+class _Stat(ctk.CTkFrame):
+    """One headline stat: a big mono value over an ALL CAPS caption. No box."""
 
     def __init__(self, master, caption: str):
-        super().__init__(
-            master, corner_radius=CORNER, fg_color=COLORS["card"],
-            border_width=1, border_color=COLORS["border"],
-        )
+        super().__init__(master, fg_color="transparent")
         self._value = ctk.CTkLabel(
-            self, text="–", font=font(32, mono=True, weight="bold"),
+            self, text="–", font=font(30, mono=True, weight="bold"),
             text_color=COLORS["text"],
         )
-        self._value.pack(anchor="w", padx=PAD, pady=(PAD, 0))
-        self._caption = ctk.CTkLabel(
+        self._value.pack(anchor="w")
+        ctk.CTkLabel(
             self, text=caption.upper(),
             font=font(10, mono=True), text_color=COLORS["text_faint"],
-        )
-        self._caption.pack(anchor="w", padx=PAD, pady=(0, PAD - 4))
+        ).pack(anchor="w")
 
     def set(self, value: str, accent: str | None = None) -> None:
         self._value.configure(text=value, text_color=accent or COLORS["text"])
 
 
-def _section_label(master, text: str) -> ctk.CTkLabel:
-    return ctk.CTkLabel(
-        master, text=text.upper(), anchor="w",
-        font=font(10, mono=True, weight="bold"), text_color=COLORS["text_faint"],
-    )
+def _rule(master) -> ctk.CTkFrame:
+    """A 1px hairline divider."""
+
+    return ctk.CTkFrame(master, height=1, corner_radius=0, fg_color=COLORS["border"])
+
+
+class _SectionHeader(ctk.CTkFrame):
+    """``CAPTION ── count ───────────`` — a flat section divider with a count."""
+
+    def __init__(self, master, text: str):
+        super().__init__(master, fg_color="transparent")
+        self.grid_columnconfigure(2, weight=1)
+        ctk.CTkLabel(
+            self, text=text.upper(), anchor="w",
+            font=font(10, mono=True, weight="bold"), text_color=COLORS["text_faint"],
+        ).grid(row=0, column=0, sticky="w")
+        self._count = ctk.CTkLabel(
+            self, text="", anchor="w",
+            font=font(10, mono=True), text_color=COLORS["text_faint"],
+        )
+        self._count.grid(row=0, column=1, sticky="w", padx=(8, 0))
+        _rule(self).grid(row=0, column=2, sticky="ew", padx=(GAP, 0))
+
+    def set_count(self, text: str, color: str | None = None) -> None:
+        self._count.configure(text=text, text_color=color or COLORS["text_faint"])
 
 
 # --------------------------------------------------------------------------- #
@@ -101,7 +124,7 @@ class DashboardView(ctk.CTkFrame):
     def __init__(self, master, app: "App"):  # noqa: F821 - App imported lazily by app.py
         super().__init__(master, corner_radius=0, fg_color=COLORS["panel"])
         self.app = app
-        # Content signatures for the destroy-and-rebuild list panels, so a
+        # Content signatures for the destroy-and-rebuild list sections, so a
         # refresh whose data hasn't changed (e.g. a sweep that flipped nothing)
         # skips rebuilding hundreds of row widgets. ``None`` forces a first build.
         self._sig_attention: tuple | None = None
@@ -125,14 +148,13 @@ class DashboardView(ctk.CTkFrame):
         body = ctk.CTkScrollableFrame(self, fg_color="transparent")
         body.grid(row=0, column=0, sticky="nsew", padx=PAD, pady=PAD)
         body.grid_columnconfigure(0, weight=1)
-        body.grid_columnconfigure(1, weight=1)
         self._body = body
         row = 0
 
-        # KPI bar (spans both columns).
-        self._kpi_bar = ctk.CTkFrame(body, fg_color="transparent")
-        self._kpi_bar.grid(row=row, column=0, columnspan=2, sticky="ew", pady=(0, GAP))
-        self._kpi_tiles: dict[str, StatTile] = {}
+        # Stat strip — bare numbers separated by hairlines, no tiles.
+        strip = ctk.CTkFrame(body, fg_color="transparent")
+        strip.grid(row=row, column=0, sticky="ew", pady=(0, PAD))
+        self._stats: dict[str, _Stat] = {}
         for index, (key, caption) in enumerate(
             (
                 ("rooms", "Rooms"),
@@ -142,34 +164,47 @@ class DashboardView(ctk.CTkFrame):
                 ("healthy", "Healthy rooms"),
             )
         ):
-            self._kpi_bar.grid_columnconfigure(index, weight=1, uniform="kpi")
-            tile = StatTile(self._kpi_bar, caption)
-            tile.grid(row=0, column=index, sticky="ew", padx=(0 if index == 0 else GAP, 0))
-            self._kpi_tiles[key] = tile
+            if index:
+                ctk.CTkFrame(
+                    strip, width=1, corner_radius=0, fg_color=COLORS["border"],
+                ).pack(side="left", fill="y", padx=PAD + 8, pady=4)
+            stat = _Stat(strip, caption)
+            stat.pack(side="left")
+            self._stats[key] = stat
         row += 1
 
-        # Lower panels in two columns: left = Attention + Recorders,
-        # right = Uptime + Activity.
-        _section_label(body, "Needs attention").grid(row=row, column=0, sticky="w", pady=(GAP, 6), padx=(0, GAP // 2))
-        _section_label(body, "Uptime · last 24h").grid(row=row, column=1, sticky="w", pady=(GAP, 6), padx=(GAP // 2, 0))
-        row += 1
-        self._attention = ctk.CTkScrollableFrame(body, fg_color=COLORS["card"], corner_radius=CORNER, height=200)
-        self._attention.grid(row=row, column=0, sticky="nsew", padx=(0, GAP // 2), pady=(0, GAP))
-        self._attention.grid_columnconfigure(0, weight=1)
-        self._uptime = ctk.CTkScrollableFrame(body, fg_color=COLORS["card"], corner_radius=CORNER, height=200)
-        self._uptime.grid(row=row, column=1, sticky="nsew", padx=(GAP // 2, 0), pady=(0, GAP))
-        self._uptime.grid_columnconfigure(0, weight=1)
+        _rule(body).grid(row=row, column=0, sticky="ew")
         row += 1
 
-        _section_label(body, "Recorders").grid(row=row, column=0, sticky="w", pady=(GAP, 6), padx=(0, GAP // 2))
-        _section_label(body, "Recent activity").grid(row=row, column=1, sticky="w", pady=(GAP, 6), padx=(GAP // 2, 0))
+        # Flat sections, one under another, separated by their header rules.
+        self._hdr_attention = _SectionHeader(body, "Needs attention")
+        self._hdr_attention.grid(row=row, column=0, sticky="ew", pady=(PAD, 4))
         row += 1
-        self._recorders = ctk.CTkScrollableFrame(body, fg_color=COLORS["card"], corner_radius=CORNER, height=200)
-        self._recorders.grid(row=row, column=0, sticky="nsew", padx=(0, GAP // 2))
-        self._recorders.grid_columnconfigure(0, weight=1)
-        self._activity = ctk.CTkScrollableFrame(body, fg_color=COLORS["card"], corner_radius=CORNER, height=200)
-        self._activity.grid(row=row, column=1, sticky="nsew", padx=(GAP // 2, 0))
-        self._activity.grid_columnconfigure(0, weight=1)
+        self._attention = self._section_container(body, row)
+        row += 1
+
+        self._hdr_recorders = _SectionHeader(body, "Recorders")
+        self._hdr_recorders.grid(row=row, column=0, sticky="ew", pady=(PAD, 4))
+        row += 1
+        self._recorders = self._section_container(body, row)
+        row += 1
+
+        self._hdr_uptime = _SectionHeader(body, "Uptime · last 24h")
+        self._hdr_uptime.grid(row=row, column=0, sticky="ew", pady=(PAD, 4))
+        row += 1
+        self._uptime = self._section_container(body, row)
+        row += 1
+
+        self._hdr_activity = _SectionHeader(body, "Recent activity")
+        self._hdr_activity.grid(row=row, column=0, sticky="ew", pady=(PAD, 4))
+        row += 1
+        self._activity = self._section_container(body, row)
+
+    def _section_container(self, body, row: int) -> ctk.CTkFrame:
+        container = ctk.CTkFrame(body, fg_color="transparent")
+        container.grid(row=row, column=0, sticky="ew")
+        container.grid_columnconfigure(0, weight=1)
+        return container
 
     # ------------------------------------------------------------------ #
     # Refresh (UI thread only)
@@ -178,7 +213,7 @@ class DashboardView(ctk.CTkFrame):
         """Repaint every section from the current site/history state."""
 
         self._last_refresh_ts = time.monotonic()
-        self._refresh_kpis()
+        self._refresh_stats()
         self._refresh_attention()
         self._refresh_recorders()
         self._refresh_uptime()
@@ -199,17 +234,17 @@ class DashboardView(ctk.CTkFrame):
 
         self.app._set_overview_sweeping(sweeping)
 
-    def _refresh_kpis(self) -> None:
+    def _refresh_stats(self) -> None:
         rooms = self.app.site.rooms
         devices = list(self.app.site.all_devices())
         online = sum(1 for d in devices if d.status is DeviceStatus.ONLINE)
         offline = sum(1 for d in devices if d.status is DeviceStatus.OFFLINE)
         healthy = sum(1 for r in rooms if r.devices and r.room_health is DeviceStatus.ONLINE)
-        self._kpi_tiles["rooms"].set(str(len(rooms)))
-        self._kpi_tiles["devices"].set(str(len(devices)))
-        self._kpi_tiles["online"].set(str(online), KPI_GOOD if online else KPI_NEUTRAL)
-        self._kpi_tiles["offline"].set(str(offline), KPI_BAD if offline else KPI_NEUTRAL)
-        self._kpi_tiles["healthy"].set(f"{healthy}/{len(rooms)}" if rooms else "0")
+        self._stats["rooms"].set(str(len(rooms)))
+        self._stats["devices"].set(str(len(devices)))
+        self._stats["online"].set(str(online), KPI_GOOD if online else KPI_NEUTRAL)
+        self._stats["offline"].set(str(offline), KPI_BAD if offline else KPI_NEUTRAL)
+        self._stats["healthy"].set(f"{healthy}/{len(rooms)}" if rooms else "0")
 
     def _refresh_attention(self) -> None:
         down: list[tuple[Room, Device]] = []
@@ -217,6 +252,10 @@ class DashboardView(ctk.CTkFrame):
             for device in room.devices:
                 if device.status is DeviceStatus.OFFLINE:
                     down.append((room, device))
+        self._hdr_attention.set_count(
+            str(len(down)) if down else "0",
+            COLORS["offline"] if down else None,
+        )
         signature = tuple(device.id for _, device in down)
         if signature == self._sig_attention:
             return  # same offline set as last paint — nothing to redo
@@ -228,25 +267,24 @@ class DashboardView(ctk.CTkFrame):
             return
         overflow = len(down) - MAX_LIST_ROWS
         for index, (room, device) in enumerate(down[:MAX_LIST_ROWS]):
-            line = _row_button(
-                self._attention, index,
-                command=lambda r=room: self.app.open_room_from_dashboard(r),
-            )
+            line = _row_button(self._attention, index)
             ctk.CTkLabel(
                 line, text="●", width=16, font=font(13),
                 text_color=status_color(DeviceStatus.OFFLINE),
             ).grid(row=0, column=0, padx=(8, 6))
-            text = ctk.CTkFrame(line, fg_color="transparent")
-            text.grid(row=0, column=1, sticky="ew")
-            text.grid_columnconfigure(0, weight=1)
             ctk.CTkLabel(
-                text, text=device.name, anchor="w",
+                line, text=device.name, anchor="w",
                 font=font(12), text_color=COLORS["text"],
-            ).grid(row=0, column=0, sticky="ew")
+            ).grid(row=0, column=1, sticky="ew")
             ctk.CTkLabel(
-                text, text=f"{room.name.upper()}   ·   {device.address}", anchor="w",
+                line, text=room.name.upper(), anchor="w",
+                font=font(10, mono=True), text_color=COLORS["text_muted"],
+            ).grid(row=0, column=2, sticky="w", padx=(GAP, 0))
+            ctk.CTkLabel(
+                line, text=device.address, anchor="e",
                 font=font(10, mono=True), text_color=COLORS["text_faint"],
-            ).grid(row=1, column=0, sticky="ew")
+            ).grid(row=0, column=3, sticky="e", padx=(GAP, 10))
+            _activate_row(line, lambda r=room: self.app.open_room_from_dashboard(r))
         if overflow > 0:
             _empty(self._attention, f"+ {overflow} more offline…")
 
@@ -257,6 +295,7 @@ class DashboardView(ctk.CTkFrame):
             for device in room.devices
             if isinstance(device, Recorder)
         ]
+        self._hdr_recorders.set_count(str(len(recorders)) if recorders else "")
         signature = tuple(
             (device.id, device.recording_status) for _, device in recorders
         )
@@ -269,26 +308,21 @@ class DashboardView(ctk.CTkFrame):
             _empty(self._recorders, "No recorders configured.")
             return
         for index, (room, device) in enumerate(recorders[:MAX_LIST_ROWS]):
-            line = _row_button(
-                self._recorders, index,
-                command=lambda r=room: self.app.open_room_from_dashboard(r),
-            )
-            text = ctk.CTkFrame(line, fg_color="transparent")
-            text.grid(row=0, column=0, sticky="ew", padx=(8, 0))
-            text.grid_columnconfigure(0, weight=1)
+            line = _row_button(self._recorders, index)
             ctk.CTkLabel(
-                text, text=device.name, anchor="w",
+                line, text=device.name, anchor="w",
                 font=font(12, weight="bold"), text_color=COLORS["text"],
-            ).grid(row=0, column=0, sticky="ew")
+            ).grid(row=0, column=1, sticky="ew", padx=(8, 0))
             ctk.CTkLabel(
-                text, text=room.name, anchor="w",
-                font=font(11), text_color=COLORS["text_faint"],
-            ).grid(row=1, column=0, sticky="ew")
+                line, text=room.name.upper(), anchor="w",
+                font=font(10, mono=True), text_color=COLORS["text_muted"],
+            ).grid(row=0, column=2, sticky="w", padx=(GAP, 0))
             ctk.CTkLabel(
                 line, text=recording_status_label(device.recording_status),
                 font=font(11, weight="bold"),
                 text_color=recording_status_color(device.recording_status),
-            ).grid(row=0, column=1, padx=(GAP, 10))
+            ).grid(row=0, column=3, sticky="e", padx=(GAP, 10))
+            _activate_row(line, lambda r=room: self.app.open_room_from_dashboard(r))
 
     def _refresh_uptime(self) -> None:
         history = self.app.history
@@ -313,21 +347,18 @@ class DashboardView(ctk.CTkFrame):
             _empty(self._uptime, "No uptime history yet — run a sweep.")
             return
         for index, (room, pct) in enumerate(rows):
-            line = _row_button(
-                self._uptime, index,
-                command=lambda r=room: self.app.open_room_from_dashboard(r),
-            )
+            line = _row_button(self._uptime, index)
             ctk.CTkLabel(
                 line, text=room.name, anchor="w",
                 font=font(12), text_color=COLORS["text"],
-            ).grid(row=0, column=0, sticky="ew", padx=(8, GAP))
-            _UptimeBar(line, pct).grid(row=0, column=1, padx=(0, 8))
+            ).grid(row=0, column=1, sticky="ew", padx=(8, GAP))
+            _UptimeBar(line, pct).grid(row=0, column=2, padx=(0, 8))
             ctk.CTkLabel(
                 line, text="—" if pct is None else f"{pct:.0f}%", width=44, anchor="e",
-                font=font(12, weight="bold"),
+                font=font(12, mono=True, weight="bold"),
                 text_color=_uptime_color(pct),
-            ).grid(row=0, column=2, padx=(0, 10))
-            line.grid_columnconfigure(0, weight=1)
+            ).grid(row=0, column=3, padx=(0, 10))
+            _activate_row(line, lambda r=room: self.app.open_room_from_dashboard(r))
 
     def _refresh_activity(self) -> None:
         events = tail_audit(ACTIVITY_LIMIT)
@@ -344,16 +375,16 @@ class DashboardView(ctk.CTkFrame):
             return
         for index, event in enumerate(events):
             line = ctk.CTkFrame(self._activity, fg_color="transparent")
-            line.grid(row=index, column=0, sticky="ew", pady=2, padx=4)
+            line.grid(row=index, column=0, sticky="ew", pady=1, padx=4)
             line.grid_columnconfigure(0, weight=1)
             ctk.CTkLabel(
                 line, text=_event_summary(event), anchor="w",
-                font=font(12), text_color=COLORS["text"],
-            ).grid(row=0, column=0, sticky="ew")
+                font=font(12), text_color=COLORS["text_muted"],
+            ).grid(row=0, column=0, sticky="ew", padx=(8, 0))
             ctk.CTkLabel(
                 line, text=_event_time(event), anchor="e",
                 font=font(11, mono=True), text_color=COLORS["text_faint"],
-            ).grid(row=0, column=1, padx=(GAP, 0))
+            ).grid(row=0, column=1, padx=(GAP, 10))
 
 
 # --------------------------------------------------------------------------- #
@@ -362,13 +393,13 @@ class DashboardView(ctk.CTkFrame):
 class _UptimeBar(tk.Canvas):
     """A slim horizontal bar: green = up portion, red = down, over the window."""
 
-    WIDTH = 120
-    HEIGHT = 12
+    WIDTH = 140
+    HEIGHT = 8
 
     def __init__(self, master, pct: float | None):
         super().__init__(
             master, width=self.WIDTH, height=self.HEIGHT,
-            highlightthickness=0, bd=0, bg=COLORS["card"],
+            highlightthickness=0, bd=0, bg=COLORS["panel"],
         )
         self._draw(pct)
 
@@ -387,36 +418,69 @@ class _UptimeBar(tk.Canvas):
 # --------------------------------------------------------------------------- #
 # Helpers
 # --------------------------------------------------------------------------- #
-def _clear(frame: ctk.CTkScrollableFrame) -> None:
+def _clear(frame: ctk.CTkFrame) -> None:
     for child in frame.winfo_children():
         child.destroy()
 
 
-def _empty(frame: ctk.CTkScrollableFrame, text: str) -> None:
+def _empty(frame: ctk.CTkFrame, text: str) -> None:
     ctk.CTkLabel(
         frame, text=text, anchor="w",
-        font=font(12), text_color=COLORS["text_muted"],
-    ).grid(row=0, column=0, sticky="ew", padx=10, pady=10)
+        font=font(12), text_color=COLORS["text_faint"],
+    ).grid(row=999, column=0, sticky="ew", padx=8, pady=6)
 
 
-def _row_button(frame: ctk.CTkScrollableFrame, index: int, command) -> ctk.CTkFrame:
-    """A hover-highlighting, clickable row inside a scrollable list."""
+def _row_button(frame: ctk.CTkFrame, index: int) -> ctk.CTkFrame:
+    """A hover-highlighting, clickable row inside a flat section.
 
-    line = ctk.CTkFrame(frame, fg_color="transparent", corner_radius=CORNER)
-    line.grid(row=index, column=0, sticky="ew", pady=2, padx=4)
+    Call :func:`_activate_row` once the row's children have been added so the
+    hover/click bindings cover the labels too (Tk events don't bubble from
+    child widgets to the row frame).
+    """
+
+    line = ctk.CTkFrame(frame, fg_color="transparent", corner_radius=_ROW_CORNER)
+    line.grid(row=index, column=0, sticky="ew", pady=1)
     line.grid_columnconfigure(1, weight=1)
+    return line
+
+
+def _descendants(widget) -> list:
+    found = []
+    for child in widget.winfo_children():
+        found.append(child)
+        found.extend(_descendants(child))
+    return found
+
+
+def _activate_row(line: ctk.CTkFrame, command) -> None:
+    """Bind hover highlight + click to a row and everything inside it."""
+
+    def inside(widget) -> bool:
+        w = widget
+        while w is not None:
+            if w is line:
+                return True
+            w = getattr(w, "master", None)
+        return False
 
     def enter(_e=None):
-        line.configure(fg_color=COLORS["card_hover"])
+        line.configure(fg_color=COLORS["card"])
 
-    def leave(_e=None):
-        line.configure(fg_color="transparent")
+    def leave(event):
+        # Moving onto a child label fires <Leave> on the row; only clear the
+        # highlight when the pointer has genuinely left the row's subtree.
+        under = line.winfo_containing(event.x_root, event.y_root)
+        if under is None or not inside(under):
+            line.configure(fg_color="transparent")
 
-    line.bind("<Enter>", enter)
-    line.bind("<Leave>", leave)
-    line.bind("<Button-1>", lambda _e: command())
-    line.configure(cursor="hand2")
-    return line
+    for widget in [line, *_descendants(line)]:
+        widget.bind("<Enter>", enter)
+        widget.bind("<Leave>", leave)
+        widget.bind("<Button-1>", lambda _e: command())
+        try:
+            widget.configure(cursor="hand2")
+        except tk.TclError:
+            pass
 
 
 def _uptime_color(pct: float | None) -> str:

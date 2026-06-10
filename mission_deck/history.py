@@ -230,6 +230,39 @@ class HistoryStore:
                 result[room_id] = (online or 0) * 100.0 / total
         return result
 
+    def devices_uptime(
+        self, device_ids: list[str], since_seconds: int = 86400
+    ) -> dict[str, float | None]:
+        """Per-device online percentage for many devices in a single query.
+
+        The status-report export needs every device's uptime at once; like
+        :meth:`rooms_uptime` this does one grouped scan and returns
+        ``{device_id: pct-or-None}`` with every requested device present
+        (``None`` when it has no samples in the window).
+        """
+
+        result: dict[str, float | None] = {did: None for did in device_ids}
+        if self._conn is None or not device_ids:
+            return result
+        cutoff = int(time.time()) - max(0, since_seconds)
+        wanted = set(device_ids)
+        with self._lock:
+            try:
+                cur = self._conn.execute(
+                    "SELECT device_id, "
+                    "SUM(CASE WHEN status = ? THEN 1 ELSE 0 END), COUNT(*) "
+                    "FROM samples WHERE ts >= ? GROUP BY device_id",
+                    (DeviceStatus.ONLINE.value, cutoff),
+                )
+                rows = cur.fetchall()
+            except sqlite3.Error as exc:
+                logger.warning("Could not read devices uptime: %s", exc)
+                return result
+        for device_id, online, total in rows:
+            if device_id in wanted and total:
+                result[device_id] = (online or 0) * 100.0 / total
+        return result
+
     def _uptime_where(
         self, where: str, params: tuple, since_seconds: int
     ) -> float | None:

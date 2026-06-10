@@ -36,6 +36,7 @@ from mission_deck.history import HistoryStore, Sample
 from mission_deck.icons import category_icon_name, icon
 from mission_deck.logging_setup import audit, current_user, setup_logging
 from mission_deck.plugins import PluginsView, plugin_by_id, spec_note, tile_plugins
+from mission_deck import report
 from mission_deck.controls import DeviceControl, controls_for
 from mission_deck.editors import (
     CommandEditorDialog,
@@ -1250,6 +1251,12 @@ class App(ctk.CTk):
             **BTN_SOLID,
         )
         self._ov_refresh_btn.pack(side="right")
+        self._ov_export_btn = ctk.CTkButton(
+            frame, text="EXPORT", width=84, height=32,
+            font=font(11, mono=True), command=self.on_export_report,
+            **style(BTN_OUTLINE, text_color=COLORS["text_muted"]),
+        )
+        self._ov_export_btn.pack(side="right", padx=(0, GAP))
         self._ov_auto_var = ctk.BooleanVar(value=self.app_state.dashboard_poll_enabled)
         ctk.CTkSwitch(
             frame, text="Auto", variable=self._ov_auto_var,
@@ -1387,6 +1394,43 @@ class App(ctk.CTk):
         self._ov_sweep_label.configure(
             text=f"last sweep {ts.strftime('%H:%M:%S')}" if ts else "no sweep yet"
         )
+
+    def _flash_overview_status(self, text: str, duration_ms: int = 5000) -> None:
+        """Show a transient message in the overview topbar, then restore it."""
+
+        self._ov_sweep_label.configure(text=text)
+
+        def restore() -> None:
+            if not self._sweeping:
+                self._refresh_overview_sweep_label()
+
+        self.after(duration_ms, restore)
+
+    def on_export_report(self) -> None:
+        """Save an estate status CSV: one row per device with its 24h uptime."""
+
+        path = filedialog.asksaveasfilename(
+            parent=self,
+            title="Export status report",
+            defaultextension=".csv",
+            initialfile=report.default_filename(),
+            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
+        )
+        if not path:
+            return
+
+        def work() -> str:
+            count = report.write_csv(path, self.site, self.history)
+            return f"exported {count} devices to {Path(path).name}"
+
+        def done(ok: bool, message: str) -> None:
+            if ok:
+                audit("report.export", path=path)
+                self._flash_overview_status(message)
+            else:
+                messagebox.showerror("Export failed", message, parent=self)
+
+        self.run_background(work, done)
 
     # ------------------------------------------------------------------ #
     # Rooms view (sidebar tree + room detail)
