@@ -79,3 +79,70 @@ SWITCH: dict = {
     "button_hover_color": "#dddddd",
     "fg_color": COLORS["border_2"],
 }
+
+
+class PromptDialog(ctk.CTkToplevel):
+    """A Nothing-styled modal text prompt (drop-in for ``CTkInputDialog``).
+
+    ``get_input()`` blocks until the dialog closes and returns the entered
+    string, or ``None`` on cancel/close — same contract as CTkInputDialog.
+    """
+
+    def __init__(self, parent, title: str, prompt: str):
+        super().__init__(parent)
+        self._value: str | None = None
+        self.title(title)
+        self.configure(fg_color=COLORS["bg"])
+        self.resizable(False, False)
+        self.transient(parent)
+        self.geometry(f"+{parent.winfo_rootx() + 60}+{parent.winfo_rooty() + 60}")
+        self.grid_columnconfigure(0, weight=1)
+
+        ctk.CTkLabel(
+            self, text=prompt, anchor="w", justify="left", wraplength=380,
+            font=font(12), text_color=COLORS["text_muted"],
+        ).grid(row=0, column=0, sticky="ew", padx=20, pady=(18, 10))
+        self._entry = ctk.CTkEntry(
+            self, width=400, height=34, corner_radius=8,
+            border_width=1, border_color=COLORS["border_2"],
+            fg_color=COLORS["card"], text_color=COLORS["text"],
+            font=font(12, mono=True),
+        )
+        self._entry.grid(row=1, column=0, sticky="ew", padx=20)
+
+        bar = ctk.CTkFrame(self, fg_color="transparent")
+        bar.grid(row=2, column=0, sticky="e", padx=20, pady=(14, 18))
+        ctk.CTkButton(
+            bar, text="CANCEL", width=92, height=32,
+            font=font(11, mono=True), command=self._cancel, **BTN_GHOST,
+        ).pack(side="left", padx=(0, 10))
+        ctk.CTkButton(
+            bar, text="OK", width=92, height=32,
+            font=font(11, mono=True, weight="bold"), command=self._ok, **BTN_SOLID,
+        ).pack(side="left")
+
+        self.bind("<Return>", lambda _e: self._ok())
+        self.bind("<Escape>", lambda _e: self._cancel())
+        self.protocol("WM_DELETE_WINDOW", self._cancel)
+        self.after(60, self._focus)
+
+    def _focus(self) -> None:
+        # Focus/grab can fail transiently on some window managers; cosmetic.
+        try:
+            self.lift()
+            self.grab_set()
+            self._entry.focus_set()
+        except Exception:
+            pass
+
+    def _ok(self) -> None:
+        self._value = self._entry.get()
+        self.destroy()
+
+    def _cancel(self) -> None:
+        self._value = None
+        self.destroy()
+
+    def get_input(self) -> str | None:
+        self.master.wait_window(self)
+        return self._value

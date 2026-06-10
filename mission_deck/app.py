@@ -81,7 +81,16 @@ from mission_deck.theme import (
     status_color,
     status_label,
 )
-from mission_deck.ui import BTN_DANGER, BTN_GHOST, BTN_OUTLINE, BTN_SOLID, SWITCH, font, style
+from mission_deck.ui import (
+    BTN_DANGER,
+    BTN_GHOST,
+    BTN_OUTLINE,
+    BTN_SOLID,
+    SWITCH,
+    PromptDialog,
+    font,
+    style,
+)
 
 # Always-present navigation entries for the icon rail: (key, label). The icon
 # name == key. Plugin-contributed tiles (e.g. Cloud Sync) are appended at
@@ -724,8 +733,7 @@ class DeviceControlDialog(ctk.CTkToplevel):
     def _run_control(self, control: DeviceControl) -> None:
         value = None
         if control.prompt:
-            dialog = ctk.CTkInputDialog(text=control.prompt, title=control.label)
-            value = dialog.get_input()
+            value = PromptDialog(self, control.label, control.prompt).get_input()
             if value is None:  # cancelled
                 return
         self._set_status(f"Running “{control.label}”…", duration_ms=0)
