@@ -44,6 +44,7 @@ Each module has one job and strict constraints:
 | `theme.py` | Colour and sizing constants | Pure constants, no logic |
 | `ui.py` | Cached shared fonts, button/switch style tokens, `PromptDialog` | All views use `ui.font()` (never raw `CTkFont`), the `BTN_*`/`SWITCH` tokens, and `PromptDialog` (never `CTkInputDialog`); cache resets per Tk root |
 | `palette.py` | Global command palette (Ctrl+K): fuzzy jump to rooms/devices/actions | Presentation only; items built from live `Site` on open; every action is a callback into `App` |
+| `toast.py` | Non-blocking toast notifications (bottom-right stack) | Presentation only; no I/O; callers pass finished strings; capped stack, auto-dismiss |
 | `logging_setup.py` | Centralised diagnostic + audit logging | Stdlib only; idempotent; never raises into callers |
 | `icons.py` | Vector icon factory (CTkImage) | Presentation only |
 | `plugins.py` | Plugins screen + plugin catalogue (`PluginSpec`) | Presentation + static catalogue; activation state lives in `AppState` |
@@ -61,7 +62,17 @@ navigate), then the active view. There is no left icon rail — navigation is
 horizontal. Plugin-contributed views (e.g. Cloud Sync) add/remove their nav
 tab at runtime via `App._add_nav_tab`/`_remove_nav_tab`. Global shortcuts:
 Ctrl+K / Ctrl+P command palette, Ctrl+1..4 view switching, Ctrl+F room filter,
-F5 re-probe the current view (room check or estate sweep), Ctrl+, settings.
+F5 re-probe the current view (room check or estate sweep), Ctrl+, settings,
+F1 shortcut reference (`ShortcutsDialog`).
+
+Cross-cutting shell behaviour: background outcomes surface as **toasts**
+(`toast.py` — sweep complete, devices *newly* offline since the previous sweep
+via `App._notify_sweep_result`, report exported, settings saved); the room view
+has **status filter chips** (all/online/offline, `App.set_room_filter`) that
+re-evaluate membership when a check or sweep lands; the estate sweep shows live
+`sweeping N/M…` progress in the overview context bar; and the window geometry
+(or maximised state) persists across sessions in `AppState.window_geometry`
+(captured in `App.destroy`).
 
 ### Data model hierarchy
 

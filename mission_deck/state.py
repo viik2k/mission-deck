@@ -56,6 +56,8 @@ class AppState:
     dashboard_poll_enabled: bool = False  # background estate-wide status sweeps
     dashboard_poll_seconds: int = 120     # interval between background sweeps
     history_retention_days: int = 30      # prune uptime samples older than this
+    # Last window geometry ("WxH+X+Y", or "zoomed"); restored on next launch.
+    window_geometry: str = ""
 
     # ------------------------------------------------------------------ #
     def __post_init__(self) -> None:
@@ -87,6 +89,8 @@ class AppState:
                 setattr(self, attr, bool(getattr(self, attr)))
         if not isinstance(self.browser_path, str):
             self.browser_path = ""
+        if not isinstance(self.window_geometry, str):
+            self.window_geometry = ""
         if self.last_config_path is not None and not isinstance(self.last_config_path, str):
             self.last_config_path = None
         if self.appearance not in ("dark", "light", "system"):

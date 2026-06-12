@@ -168,6 +168,8 @@ class CommandPalette(ctk.CTkToplevel):
             app.on_export_report, "csv report save export")
         add("Open settings", "preferences", "settings", muted,
             app.open_settings, "settings preferences timeout browser appearance")
+        add("Keyboard shortcuts", "F1", "command", muted,
+            app.open_shortcuts, "help keys hotkeys reference")
         add("Switch configuration", "open another config file", "folder", muted,
             app.switch_config_dialog, "config json file open switch")
         add("Go to Overview", "view", "overview", muted,

@@ -41,6 +41,7 @@ python -m mission_deck
   - `logging_setup.py` — diagnostic + audit logging; installs crash-capturing excepthooks
   - `editors.py` — in-app room/device/command editor dialogs (go through `models`/`config` validation)
   - `palette.py` — global command palette (Ctrl+K): fuzzy jump to rooms/devices/actions; presentation only
+  - `toast.py` — non-blocking toast notifications (bottom-right stack); presentation only
   - `app.py` — CustomTkinter GUI + orchestration (top nav bar, room view, Overview, estate sweep, keyboard shortcuts)
 
 ## Code conventions

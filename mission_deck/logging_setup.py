@@ -78,6 +78,13 @@ def _resolve_log_dir() -> Path:
     return user_config_dir() / LOG_DIRNAME
 
 
+def log_location() -> Path | None:
+    """The directory logs are being written to, or ``None`` before setup /
+    when no writable location was available. For UI "open logs" affordances."""
+
+    return _log_dir
+
+
 def _resolve_level() -> int:
     name = (os.environ.get("MISSION_DECK_LOG_LEVEL") or "INFO").strip().upper()
     return logging.getLevelName(name) if name in logging._nameToLevel else logging.INFO

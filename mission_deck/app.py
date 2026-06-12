@@ -23,7 +23,11 @@ to edit JSON by hand.
 from __future__ import annotations
 
 import logging
+import os
 import queue
+import re
+import subprocess
+import sys
 import threading
 import traceback
 from datetime import datetime
@@ -38,7 +42,7 @@ from mission_deck.cloud import CloudView
 from mission_deck.dashboard import DashboardView
 from mission_deck.history import HistoryStore, Sample
 from mission_deck.icons import category_icon_name, icon
-from mission_deck.logging_setup import audit, current_user, setup_logging
+from mission_deck.logging_setup import audit, current_user, log_location, setup_logging
 from mission_deck.plugins import PluginsView, plugin_by_id, spec_note, tile_plugins
 from mission_deck import report
 from mission_deck.controls import DeviceControl, controls_for
@@ -72,6 +76,7 @@ from mission_deck.models import (
 )
 from mission_deck.palette import CommandPalette
 from mission_deck.state import AppState
+from mission_deck.toast import Toaster
 from mission_deck.theme import (
     CORNER,
     CORNER_LG,
@@ -780,7 +785,12 @@ class DeviceControlDialog(ctk.CTkToplevel):
 # Settings dialog
 # --------------------------------------------------------------------------- #
 class SettingsDialog(ctk.CTkToplevel):
-    """GUI for every preference, so users never edit JSON by hand."""
+    """GUI for every preference, so users never edit JSON by hand.
+
+    Organised into titled sections (monitoring / browser / overview / data /
+    diagnostics) like a grown-up preferences pane; the diagnostics section
+    surfaces the version, config source and a one-click "open logs folder".
+    """
 
     def __init__(self, app: "App"):
         super().__init__(app)
@@ -788,7 +798,7 @@ class SettingsDialog(ctk.CTkToplevel):
         self.app_state = app.app_state
         self.title("Settings")
         self.configure(fg_color=COLORS["bg"])
-        self.geometry("520x560")
+        self.geometry("560x640")
         self.transient(app)
         self.grid_columnconfigure(0, weight=1)
 
@@ -796,31 +806,23 @@ class SettingsDialog(ctk.CTkToplevel):
         body.grid(row=0, column=0, sticky="nsew", padx=PAD, pady=PAD)
         body.grid_columnconfigure(1, weight=1)
         self.grid_rowconfigure(0, weight=1)
-        row = 0
+        self._body = body
+        self._row = 0
 
-        def label(text: str) -> None:
-            nonlocal row
-            ctk.CTkLabel(
-                body, text=text, anchor="w",
-                font=font(13), text_color=COLORS["text"],
-            ).grid(row=row, column=0, sticky="w", padx=(0, GAP), pady=8)
-
-        # Ping timeout
-        label("Status check timeout (seconds)")
+        # --- Monitoring ------------------------------------------------- #
+        self._section("Monitoring")
         self._timeout = ctk.StringVar(value=str(app._effective_timeout()))
-        ctk.CTkEntry(body, textvariable=self._timeout, fg_color=COLORS["card"]).grid(
-            row=row, column=1, sticky="ew", pady=8); row += 1
-
-        # Auto-refresh interval
-        label("Auto-refresh interval (seconds)")
+        self._entry_row("Status check timeout (seconds)", self._timeout)
         self._refresh = ctk.StringVar(value=str(self.app_state.auto_refresh_seconds or 60))
-        ctk.CTkEntry(body, textvariable=self._refresh, fg_color=COLORS["card"]).grid(
-            row=row, column=1, sticky="ew", pady=8); row += 1
+        self._entry_row("Auto-refresh interval (seconds)", self._refresh)
+        self._concurrency = ctk.StringVar(value=str(self.app_state.max_concurrent_checks or 0))
+        self._entry_row("Max concurrent probes (0 = automatic)", self._concurrency)
 
-        # Browser path + browse
-        label("Browser (leave blank for system default)")
+        # --- Browser ---------------------------------------------------- #
+        self._section("Browser")
+        self._label("Browser (leave blank for system default)")
         browser_row = ctk.CTkFrame(body, fg_color="transparent")
-        browser_row.grid(row=row, column=1, sticky="ew", pady=8)
+        browser_row.grid(row=self._row, column=1, sticky="ew", pady=8)
         browser_row.grid_columnconfigure(0, weight=1)
         self._browser = ctk.StringVar(value=self.app_state.browser_path)
         ctk.CTkEntry(browser_row, textvariable=self._browser, fg_color=COLORS["card"]).grid(
@@ -828,38 +830,45 @@ class SettingsDialog(ctk.CTkToplevel):
         ctk.CTkButton(
             browser_row, text="BROWSE…", width=80, command=self._browse_browser,
             font=font(11, mono=True), **BTN_GHOST,
-        ).grid(row=0, column=1, padx=(GAP, 0)); row += 1
-
-        # Browser new window
-        label("Open web UIs in a new window")
+        ).grid(row=0, column=1, padx=(GAP, 0))
+        self._row += 1
         self._new_window = ctk.BooleanVar(value=self.app_state.browser_new_window)
-        ctk.CTkSwitch(body, text="", variable=self._new_window, **SWITCH).grid(
-            row=row, column=1, sticky="w", pady=8); row += 1
+        self._switch_row("Open web UIs in a new window", self._new_window)
 
-        # Open on the dashboard
-        label("Open on the dashboard at launch")
+        # --- Overview --------------------------------------------------- #
+        self._section("Overview")
         self._start_dash = ctk.BooleanVar(value=self.app_state.start_on_dashboard)
-        ctk.CTkSwitch(body, text="", variable=self._start_dash, **SWITCH).grid(
-            row=row, column=1, sticky="w", pady=8); row += 1
-
-        # Dashboard background refresh
-        label("Dashboard background refresh")
+        self._switch_row("Open on the dashboard at launch", self._start_dash)
         self._dash_poll = ctk.BooleanVar(value=self.app_state.dashboard_poll_enabled)
-        ctk.CTkSwitch(body, text="", variable=self._dash_poll, **SWITCH).grid(
-            row=row, column=1, sticky="w", pady=8); row += 1
-
-        # Background refresh interval
-        label("Background refresh interval (seconds)")
+        self._switch_row("Dashboard background refresh", self._dash_poll)
         self._dash_secs = ctk.StringVar(value=str(self.app_state.dashboard_poll_seconds or 120))
-        ctk.CTkEntry(body, textvariable=self._dash_secs, fg_color=COLORS["card"]).grid(
-            row=row, column=1, sticky="ew", pady=8); row += 1
+        self._entry_row("Background refresh interval (seconds)", self._dash_secs)
 
-        # Config file switch
-        label("Configuration file")
+        # --- Data & history ---------------------------------------------- #
+        self._section("Data & history")
+        self._retention = ctk.StringVar(value=str(self.app_state.history_retention_days or 30))
+        self._entry_row("Keep uptime history for (days)", self._retention)
+        self._label("Configuration file")
         ctk.CTkButton(
             body, text="OPEN A DIFFERENT CONFIG…", command=self._switch_config,
             font=font(11, mono=True), **BTN_GHOST,
-        ).grid(row=row, column=1, sticky="ew", pady=8); row += 1
+        ).grid(row=self._row, column=1, sticky="ew", pady=8)
+        self._row += 1
+
+        # --- Diagnostics -------------------------------------------------- #
+        self._section("Diagnostics")
+        source = str(app.config_path) if app.config_path else "example data (demo)"
+        self._info_row("Version", f"{__app_name__} v{__version__}")
+        self._info_row("Config source", source)
+        log_dir = log_location()
+        self._info_row("Log folder", str(log_dir) if log_dir else "unavailable")
+        if log_dir:
+            self._label("Diagnostic & audit logs")
+            ctk.CTkButton(
+                body, text="OPEN LOGS FOLDER", command=lambda: self.app.open_folder(log_dir),
+                font=font(11, mono=True), **BTN_GHOST,
+            ).grid(row=self._row, column=1, sticky="ew", pady=8)
+            self._row += 1
 
         # Buttons
         buttons = ctk.CTkFrame(self, fg_color="transparent")
@@ -876,6 +885,47 @@ class SettingsDialog(ctk.CTkToplevel):
 
         self.after(60, lambda: (self.lift(), self.grab_set(), self.focus_force()))
 
+    # ------------------------------------------------------------------ #
+    # Form-building helpers
+    # ------------------------------------------------------------------ #
+    def _section(self, title: str) -> None:
+        pady = (4, 2) if self._row == 0 else (18, 2)
+        ctk.CTkLabel(
+            self._body, text=title.upper(), anchor="w",
+            font=font(10, mono=True, weight="bold"), text_color=COLORS["text_faint"],
+        ).grid(row=self._row, column=0, sticky="w", pady=pady)
+        self._row += 1
+        ctk.CTkFrame(self._body, height=1, corner_radius=0, fg_color=COLORS["border"]).grid(
+            row=self._row, column=0, columnspan=2, sticky="ew", pady=(0, 4))
+        self._row += 1
+
+    def _label(self, text: str) -> None:
+        ctk.CTkLabel(
+            self._body, text=text, anchor="w",
+            font=font(13), text_color=COLORS["text"],
+        ).grid(row=self._row, column=0, sticky="w", padx=(0, GAP), pady=8)
+
+    def _entry_row(self, text: str, variable: ctk.StringVar) -> None:
+        self._label(text)
+        ctk.CTkEntry(self._body, textvariable=variable, fg_color=COLORS["card"]).grid(
+            row=self._row, column=1, sticky="ew", pady=8)
+        self._row += 1
+
+    def _switch_row(self, text: str, variable: ctk.BooleanVar) -> None:
+        self._label(text)
+        ctk.CTkSwitch(self._body, text="", variable=variable, **SWITCH).grid(
+            row=self._row, column=1, sticky="w", pady=8)
+        self._row += 1
+
+    def _info_row(self, caption: str, value: str) -> None:
+        self._label(caption)
+        ctk.CTkLabel(
+            self._body, text=value, anchor="w", justify="left", wraplength=300,
+            font=font(11, mono=True), text_color=COLORS["text_muted"],
+        ).grid(row=self._row, column=1, sticky="w", pady=8)
+        self._row += 1
+
+    # ------------------------------------------------------------------ #
     def _browse_browser(self) -> None:
         path = filedialog.askopenfilename(
             title="Select a browser executable",
@@ -902,36 +952,101 @@ class SettingsDialog(ctk.CTkToplevel):
             messagebox.showerror(__app_name__, "Auto-refresh interval must be a whole number.")
             return
         try:
+            concurrency = max(0, int(float(self._concurrency.get())))
+        except ValueError:
+            messagebox.showerror(__app_name__, "Max concurrent probes must be a whole number.")
+            return
+        try:
             dash_secs = max(0, int(float(self._dash_secs.get())))
         except ValueError:
             messagebox.showerror(__app_name__, "Background refresh interval must be a whole number.")
             return
+        try:
+            retention = max(1, int(float(self._retention.get())))
+        except ValueError:
+            messagebox.showerror(__app_name__, "History retention must be a whole number of days.")
+            return
 
         self.app_state.ping_timeout_seconds = timeout
         self.app_state.auto_refresh_seconds = refresh
+        self.app_state.max_concurrent_checks = concurrency
         self.app_state.browser_path = self._browser.get().strip()
         self.app_state.browser_new_window = bool(self._new_window.get())
         self.app_state.start_on_dashboard = bool(self._start_dash.get())
         self.app_state.dashboard_poll_enabled = bool(self._dash_poll.get())
         self.app_state.dashboard_poll_seconds = dash_secs
+        self.app_state.history_retention_days = retention
         self.app_state.save()
 
         audit(
             "settings.change",
             ping_timeout_seconds=timeout,
             auto_refresh_seconds=refresh,
+            max_concurrent_checks=concurrency,
             browser_path=self.app_state.browser_path,
             browser_new_window=self.app_state.browser_new_window,
             start_on_dashboard=self.app_state.start_on_dashboard,
             dashboard_poll_enabled=self.app_state.dashboard_poll_enabled,
             dashboard_poll_seconds=dash_secs,
+            history_retention_days=retention,
         )
         logger.info(
-            "Settings updated (timeout=%.1fs, auto_refresh=%ds, dash_poll=%s/%ds)",
-            timeout, refresh, self.app_state.dashboard_poll_enabled, dash_secs,
+            "Settings updated (timeout=%.1fs, auto_refresh=%ds, concurrency=%d, "
+            "dash_poll=%s/%ds, retention=%dd)",
+            timeout, refresh, concurrency,
+            self.app_state.dashboard_poll_enabled, dash_secs, retention,
         )
         self.app.apply_settings()
+        self.app.toaster.show("Settings saved", kind="success", duration_ms=3000)
         self.destroy()
+
+
+# --------------------------------------------------------------------------- #
+# Keyboard shortcuts reference (F1)
+# --------------------------------------------------------------------------- #
+SHORTCUTS: list[tuple[str, str]] = [
+    ("Ctrl + K  /  Ctrl + P", "Open the command palette"),
+    ("Ctrl + 1 … 4", "Switch view (Overview / Rooms / Dashboards / Plugins)"),
+    ("Ctrl + F", "Filter the room list"),
+    ("F5", "Re-probe the current view (room check or estate sweep)"),
+    ("Ctrl + ,", "Open settings"),
+    ("F1", "This shortcut reference"),
+    ("Esc", "Close the palette or a dialog"),
+]
+
+
+class ShortcutsDialog(ctk.CTkToplevel):
+    """A compact keyboard-shortcuts reference card (F1)."""
+
+    def __init__(self, app: "App"):
+        super().__init__(app)
+        self.title("Keyboard shortcuts")
+        self.configure(fg_color=COLORS["bg"])
+        self.resizable(False, False)
+        self.transient(app)
+        self.geometry(f"+{app.winfo_rootx() + 120}+{app.winfo_rooty() + 100}")
+        self.grid_columnconfigure(1, weight=1)
+
+        ctk.CTkLabel(
+            self, text="KEYBOARD SHORTCUTS",
+            font=font(11, mono=True, weight="bold"), text_color=COLORS["text_faint"],
+        ).grid(row=0, column=0, columnspan=2, sticky="w", padx=PAD + 4, pady=(PAD, 8))
+        for index, (keys, what) in enumerate(SHORTCUTS, start=1):
+            ctk.CTkLabel(
+                self, text=keys, anchor="w", width=170,
+                font=font(12, mono=True, weight="bold"), text_color=COLORS["text"],
+            ).grid(row=index, column=0, sticky="w", padx=(PAD + 4, GAP), pady=3)
+            ctk.CTkLabel(
+                self, text=what, anchor="w",
+                font=font(12), text_color=COLORS["text_muted"],
+            ).grid(row=index, column=1, sticky="w", padx=(0, PAD + 4), pady=3)
+        ctk.CTkButton(
+            self, text="CLOSE", width=90, command=self.destroy,
+            font=font(11, mono=True), **BTN_GHOST,
+        ).grid(row=len(SHORTCUTS) + 1, column=1, sticky="e", padx=PAD + 4, pady=(12, PAD))
+
+        self.bind("<Escape>", lambda _e: self.destroy())
+        self.after(60, lambda: (self.lift(), self.focus_force()))
 
 
 # --------------------------------------------------------------------------- #
@@ -1037,6 +1152,13 @@ class App(ctk.CTk):
         self._sweep_index: dict[str, tuple[Room, Device]] = {}
         self._dashboard_poll_job: str | None = None
         self.last_sweep_time: datetime | None = None
+        # Live sweep progress (drives the "sweeping N/M…" topbar readout) and
+        # the offline set of the previous sweep (drives "went offline" toasts).
+        self._sweep_total = 0
+        self._sweep_done = 0
+        self._last_offline_ids: set[str] | None = None
+        # Room-view status filter: "all" | "online" | "offline".
+        self._room_filter = "all"
 
         # --- Window chrome -------------------------------------------------- #
         ctk.set_appearance_mode(self.app_state.appearance or "dark")
@@ -1045,6 +1167,10 @@ class App(ctk.CTk):
         self.geometry("1200x760")
         self.minsize(1000, 640)
         self.configure(fg_color=COLORS["bg"])
+        self._restore_window_geometry()
+
+        # Non-blocking notifications (sweep results, offline alerts, exports).
+        self.toaster = Toaster(self)
 
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(0, weight=0)  # top nav bar (fixed)
@@ -1490,6 +1616,7 @@ class App(ctk.CTk):
             if ok:
                 audit("report.export", path=path)
                 self._flash_overview_status(message)
+                self.toaster.show("Report exported", message, kind="success")
             else:
                 messagebox.showerror("Export failed", message, parent=self)
 
@@ -1593,6 +1720,21 @@ class App(ctk.CTk):
             font=font(20, weight="bold"), text_color=COLORS["text"],
         )
         self._room_title.grid(row=0, column=0, sticky="w")
+
+        # Status filter chips — scope the card grid to all/online/offline.
+        chips = ctk.CTkFrame(head, fg_color="transparent")
+        chips.grid(row=0, column=1, rowspan=3, sticky="e", padx=(GAP, 0))
+        self._filter_chips: dict[str, ctk.CTkButton] = {}
+        for key, label in (("all", "ALL"), ("online", "ONLINE"), ("offline", "OFFLINE")):
+            chip = ctk.CTkButton(
+                chips, text=label, width=20, height=26,
+                font=font(10, mono=True),
+                command=lambda k=key: self.set_room_filter(k),
+                **BTN_GHOST,
+            )
+            chip.pack(side="left", padx=(0, 6))
+            self._filter_chips[key] = chip
+        self._paint_filter_chips()
         self._room_subtitle = ctk.CTkLabel(
             head, text="", anchor="w",
             font=font(12), text_color=COLORS["text_muted"],
@@ -1711,7 +1853,12 @@ class App(ctk.CTk):
         card_idx = 0
         section_idx = 0
         row = 0
+        shown = 0
         for category, devices in room.devices_by_category().items():
+            devices = [d for d in devices if self._passes_room_filter(d)]
+            if not devices:
+                continue
+            shown += len(devices)
             section = self._get_section(section_idx)
             section_idx += 1
             section.configure(text=f"{category}   ({len(devices)})")
@@ -1741,7 +1888,56 @@ class App(ctk.CTk):
         for section in self._section_pool[section_idx:]:
             section.grid_remove()
 
+        # An active filter with no matches deserves a message, not a blank grid.
+        if room.device_count and not shown:
+            empty = self._get_filter_empty_label()
+            empty.grid(row=0, column=0, columnspan=GRID_COLUMNS, sticky="w", pady=GAP)
+        else:
+            empty = getattr(self, "_filter_empty_label", None)
+            if empty is not None:
+                empty.grid_remove()
+
         self._update_statusbar()
+
+    def _passes_room_filter(self, device: Device) -> bool:
+        if self._room_filter == "online":
+            return device.status is DeviceStatus.ONLINE
+        if self._room_filter == "offline":
+            return device.status is DeviceStatus.OFFLINE
+        return True
+
+    def set_room_filter(self, key: str) -> None:
+        """Scope the room's card grid to all/online/offline devices."""
+
+        if key == self._room_filter:
+            return
+        self._room_filter = key
+        self._paint_filter_chips()
+        if self.current_room is not None:
+            self._render_room(self.current_room)
+
+    def _paint_filter_chips(self) -> None:
+        for key, chip in self._filter_chips.items():
+            if key == self._room_filter:
+                chip.configure(
+                    fg_color=COLORS["text"], text_color=COLORS["bg"],
+                    border_color=COLORS["text"],
+                )
+            else:
+                chip.configure(
+                    fg_color="transparent", text_color=COLORS["text_muted"],
+                    border_color=COLORS["border"],
+                )
+
+    def _get_filter_empty_label(self) -> ctk.CTkLabel:
+        label = getattr(self, "_filter_empty_label", None)
+        if label is None:
+            label = ctk.CTkLabel(
+                self._grid, text="No devices match this filter.", anchor="w",
+                font=font(13), text_color=COLORS["text_faint"],
+            )
+            self._filter_empty_label = label
+        return label
 
     def _get_card(self, index: int) -> DeviceCard:
         """Return pooled card ``index``, creating it on first use."""
@@ -1921,6 +2117,7 @@ class App(ctk.CTk):
         self.bind("<Control-f>", self._kb(self._focus_room_filter))
         self.bind("<Control-comma>", self._kb(self.open_settings))
         self.bind("<F5>", self._kb(self._refresh_current_view))
+        self.bind("<F1>", self._kb(self.open_shortcuts))
         for index, (key, _label) in enumerate(NAV_ITEMS, start=1):
             self.bind(f"<Control-Key-{index}>", self._kb(lambda k=key: self.navigate(k)))
 
@@ -1946,6 +2143,20 @@ class App(ctk.CTk):
 
         self.select_room(room)
         DeviceControlDialog(self, device)
+
+    def open_folder(self, path: Path) -> None:
+        """Reveal a folder in the platform file manager (for diagnostics)."""
+
+        try:
+            if sys.platform.startswith("win"):
+                os.startfile(path)  # type: ignore[attr-defined]
+            elif sys.platform == "darwin":
+                subprocess.Popen(["open", str(path)])
+            else:
+                subprocess.Popen(["xdg-open", str(path)])
+        except Exception as exc:
+            logger.warning("Could not open folder %s: %s", path, exc)
+            messagebox.showerror(__app_name__, f"Could not open the folder:\n\n{path}")
 
     def _focus_room_filter(self) -> None:
         self.navigate("rooms")
@@ -1998,6 +2209,8 @@ class App(ctk.CTk):
         self._sweep_gen += 1
         generation = self._sweep_gen
         self._sweeping = True
+        self._sweep_total = len(devices)
+        self._sweep_done = 0
         self._sweep_samples = []
         self._sweep_index = {
             device.id: (room, device)
@@ -2042,6 +2255,10 @@ class App(ctk.CTk):
             elif message[0] == "done":
                 self._finish_sweep(message[1])
         if self._sweeping:
+            # Live progress readout — once per tick, not once per device.
+            self._ov_sweep_label.configure(
+                text=f"sweeping {self._sweep_done}/{self._sweep_total}…"
+            )
             self.after(self._poll_interval_ms, self._drain_sweep)
 
     def _apply_sweep_result(self, generation: int, result: CheckResult) -> None:
@@ -2054,6 +2271,7 @@ class App(ctk.CTk):
         device.status = result.status
         device.last_latency_ms = result.latency_ms
         device.last_error = result.error
+        self._sweep_done += 1
         self._sweep_samples.append(
             Sample(device.id, room.id, result.status, result.latency_ms)
         )
@@ -2069,16 +2287,19 @@ class App(ctk.CTk):
             return
         self._sweeping = False
         self.last_sweep_time = datetime.now()
-        # One pass over the estate for both tallies (it can be thousands of
-        # devices; iterating twice is pure waste).
+        # One pass over the estate for the tallies *and* the offline set (it
+        # can be thousands of devices; iterating repeatedly is pure waste).
         online = offline = 0
+        offline_devices: list[tuple[str, str]] = []  # (device id, name)
         for device in self.site.all_devices():
             if device.status is DeviceStatus.ONLINE:
                 online += 1
             elif device.status is DeviceStatus.OFFLINE:
                 offline += 1
+                offline_devices.append((device.id, device.name))
         logger.info("Estate sweep complete: %d online, %d offline", online, offline)
         audit("status_check.estate", devices=len(self._sweep_index), online=online, offline=offline)
+        self._notify_sweep_result(online, offline, offline_devices)
         self._repaint_after_sweep_change()
         if self._dashboard is not None:
             self._dashboard.set_sweeping(False)
@@ -2089,15 +2310,52 @@ class App(ctk.CTk):
         if samples:
             self.run_background(lambda: self.history.record(samples), lambda ok, msg: None)
 
+    def _notify_sweep_result(
+        self, online: int, offline: int, offline_devices: list[tuple[str, str]]
+    ) -> None:
+        """Toast the sweep outcome; call out devices that *newly* went offline."""
+
+        previous = self._last_offline_ids
+        self._last_offline_ids = {device_id for device_id, _ in offline_devices}
+
+        new_names = (
+            [name for device_id, name in offline_devices if device_id not in previous]
+            if previous is not None else []
+        )
+        if new_names:
+            shown = ", ".join(new_names[:3])
+            if len(new_names) > 3:
+                shown += f"  (+{len(new_names) - 3} more)"
+            self.toaster.show(
+                f"{len(new_names)} device(s) went offline", shown,
+                kind="error", on_click=lambda: self.navigate("overview"),
+            )
+        elif offline:
+            self.toaster.show(
+                f"Sweep complete — {offline} device(s) still offline",
+                f"{online} online across {len(self.site.rooms)} rooms",
+                kind="warn", on_click=lambda: self.navigate("overview"),
+            )
+        else:
+            self.toaster.show(
+                "Sweep complete — estate healthy",
+                f"All {online} checked devices are online",
+                kind="success",
+            )
+
     def _repaint_after_sweep_change(self) -> None:
         """Refresh sidebar dots and the visible room/dashboard after a bulk change."""
 
         for btn in self._room_buttons:
             btn.refresh_health()
         if self.current_room is not None:
-            for card in self._device_cards.values():
-                card.refresh()
-            self._update_statusbar()
+            if self._room_filter != "all":
+                # Membership of the filtered grid may have changed; re-lay it out.
+                self._render_room(self.current_room)
+            else:
+                for card in self._device_cards.values():
+                    card.refresh()
+                self._update_statusbar()
         if self._showing_dashboard:
             self._refresh_dashboard()
         self._update_attention_badge()
@@ -2375,6 +2633,10 @@ class App(ctk.CTk):
             ]
             if samples:
                 self.run_background(lambda: self.history.record(samples), lambda ok, msg: None)
+            # An active status filter must re-evaluate membership now that the
+            # final statuses are in.
+            if self._room_filter != "all" and self.current_room is room:
+                self._render_room(room)
             # If the dashboard is open behind a check, keep it current.
             if self._showing_dashboard:
                 self._refresh_dashboard()
@@ -2456,6 +2718,42 @@ class App(ctk.CTk):
 
     def open_settings(self) -> None:
         SettingsDialog(self)
+
+    def open_shortcuts(self) -> None:
+        ShortcutsDialog(self)
+
+    # ------------------------------------------------------------------ #
+    # Window geometry persistence
+    # ------------------------------------------------------------------ #
+    def _restore_window_geometry(self) -> None:
+        """Re-open at the size/position (or maximised state) of last session."""
+
+        saved = self.app_state.window_geometry
+        if not saved:
+            return
+        if saved == "zoomed":
+            # Maximising must wait until the window is mapped on some WMs.
+            self.after(0, lambda: self._try_zoom())
+        elif re.fullmatch(r"\d{3,5}x\d{3,5}[+-]\d+[+-]\d+", saved):
+            self.geometry(saved)
+
+    def _try_zoom(self) -> None:
+        try:
+            self.state("zoomed")
+        except Exception:  # not supported on this platform/WM — cosmetic
+            logger.debug("Could not restore maximised state", exc_info=True)
+
+    def destroy(self) -> None:
+        """Capture the window geometry before tearing down (saved by main())."""
+
+        try:
+            if self.state() == "zoomed":
+                self.app_state.window_geometry = "zoomed"
+            else:
+                self.app_state.window_geometry = self.geometry()
+        except Exception:
+            pass
+        super().destroy()
 
     # ------------------------------------------------------------------ #
     # Config editing (add/remove/edit rooms, devices, commands)
