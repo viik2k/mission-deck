@@ -40,7 +40,8 @@ python -m mission_deck
   - `theme.py` — color palette + sizing tokens
   - `logging_setup.py` — diagnostic + audit logging; installs crash-capturing excepthooks
   - `editors.py` — in-app room/device/command editor dialogs (go through `models`/`config` validation)
-  - `app.py` — CustomTkinter GUI + orchestration (room view, Overview, estate sweep)
+  - `palette.py` — global command palette (Ctrl+K): fuzzy jump to rooms/devices/actions; presentation only
+  - `app.py` — CustomTkinter GUI + orchestration (top nav bar, room view, Overview, estate sweep, keyboard shortcuts)
 
 ## Code conventions
 - Python 3.11+, `from __future__ import annotations`, full type hints.

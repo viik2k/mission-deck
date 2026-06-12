@@ -8,8 +8,8 @@ where an operator enables and configures them.
 
 This is intentionally a *preview*, not a finished marketplace: only the
 mechanics that drive the rest of the app are wired up. Activating a plugin that
-contributes a nav tile (today: **Cloud Sync**) makes that tile appear in the
-left rail — that is the "downloaded plugins show up in the sidebar" behaviour.
+contributes a nav tab (today: **Cloud Sync**) makes that tab appear in the
+top nav bar — that is the "downloaded plugins show up in the nav" behaviour.
 Everything else is eye candy with a "coming soon" badge so the shape of the
 final screen is visible without pretending the integrations exist yet.
 """
@@ -35,7 +35,7 @@ from mission_deck.ui import font
 class PluginSpec:
     """Static description of a plugin shown on the Plugins screen.
 
-    ``tile`` — when set, ``(view_key, label, icon)`` for a rail button that
+    ``tile`` — when set, ``(view_key, label, icon)`` for a nav-bar tab that
     appears only while the plugin is enabled. ``builtin`` plugins are always on
     and cannot be toggled (the tcp/http monitors that already ship).
     """
@@ -53,7 +53,7 @@ class PluginSpec:
 
 
 # The plugin catalogue. Today this is the source of truth for both the Plugins
-# screen and the rail tiles; a real loader would discover these instead.
+# screen and the nav tabs; a real loader would discover these instead.
 PLUGINS: list[PluginSpec] = [
     PluginSpec(
         id="cloud_sync", name="Cloud Sync", by="mission-deck core", icon="cloud",
@@ -95,7 +95,7 @@ def plugin_by_id(plugin_id: str) -> PluginSpec | None:
 
 
 def tile_plugins() -> list[PluginSpec]:
-    """Plugins that contribute a rail tile when enabled."""
+    """Plugins that contribute a nav-bar tab when enabled."""
 
     return [spec for spec in PLUGINS if spec.tile is not None]
 
@@ -220,7 +220,8 @@ class PluginsView(ctk.CTkScrollableFrame):
             self,
             "Plugins extend three registries already in the codebase — monitors, "
             "device commands, and the planned config sources & notifiers. Activate "
-            "a plugin to drop its tile into the rail; the marketplace below is a "
+            "a plugin to drop its tab into the top nav bar; the marketplace below "
+            "is a "
             "preview.  (Coming soon.)",
         )
         note.grid(row=1, column=0, sticky="ew", pady=(0, GAP))
@@ -263,7 +264,7 @@ class PluginsView(ctk.CTkScrollableFrame):
         ).grid(row=0, column=1, sticky="ew", padx=(0, PAD), pady=(PAD, 0))
         ctk.CTkLabel(
             hero, text="Activate a plugin to add monitors, notifiers and config "
-            "sources. Tiles for what you turn on appear in the rail.",
+            "sources. Tabs for what you turn on appear in the top nav bar.",
             anchor="w", justify="left", wraplength=720,
             font=font(12), text_color=COLORS["text_muted"],
         ).grid(row=1, column=1, sticky="ew", padx=(0, PAD), pady=(2, PAD))

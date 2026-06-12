@@ -43,12 +43,25 @@ Each module has one job and strict constraints:
 | `state.py` | Persisted user preferences + recent files | Best-effort JSON; never breaks app if corrupt |
 | `theme.py` | Colour and sizing constants | Pure constants, no logic |
 | `ui.py` | Cached shared fonts, button/switch style tokens, `PromptDialog` | All views use `ui.font()` (never raw `CTkFont`), the `BTN_*`/`SWITCH` tokens, and `PromptDialog` (never `CTkInputDialog`); cache resets per Tk root |
+| `palette.py` | Global command palette (Ctrl+K): fuzzy jump to rooms/devices/actions | Presentation only; items built from live `Site` on open; every action is a callback into `App` |
 | `logging_setup.py` | Centralised diagnostic + audit logging | Stdlib only; idempotent; never raises into callers |
 | `icons.py` | Vector icon factory (CTkImage) | Presentation only |
 | `plugins.py` | Plugins screen + plugin catalogue (`PluginSpec`) | Presentation + static catalogue; activation state lives in `AppState` |
 | `cloud.py` | Cloud Sync view (config-source preview, plugin-gated) | Presentation only; no real Graph client yet |
 | `editors.py` | Room / device / command editor dialogs | Presentation; writes back through `App` save paths |
 | `app.py` | CustomTkinter UI + event orchestration | Marshals network results to UI thread |
+
+### Window shell (top navigation)
+
+The window stacks, top to bottom: a **top nav bar** (brand mark, labelled view
+tabs with an accent active-underline, a live "N OFFLINE" attention badge that
+jumps to the overview, the Ctrl+K search button, settings, and the operator
+chip), a slim **context bar** (breadcrumb + per-view actions, swapped on
+navigate), then the active view. There is no left icon rail — navigation is
+horizontal. Plugin-contributed views (e.g. Cloud Sync) add/remove their nav
+tab at runtime via `App._add_nav_tab`/`_remove_nav_tab`. Global shortcuts:
+Ctrl+K / Ctrl+P command palette, Ctrl+1..4 view switching, Ctrl+F room filter,
+F5 re-probe the current view (room check or estate sweep), Ctrl+, settings.
 
 ### Data model hierarchy
 
@@ -82,7 +95,7 @@ single decorator — no caller changes.
 
 The **Overview** (`dashboard.py`) is a second top-level view, swapped with the
 room panel in the same grid cell (`App.show_dashboard()` / `show_room_view()`;
-sidebar "⌂ Overview" button). It is deliberately **not** a bento grid of boxed
+"OVERVIEW" tab in the top nav bar). It is deliberately **not** a bento grid of boxed
 cards: it renders as a flat, single-column report — a bare stat strip (rooms /
 devices / online / offline / healthy), then hairline-ruled sections for
 attention (offline devices), recorders, per-room 24h uptime and a
