@@ -47,6 +47,14 @@ click** (the headline feature of the original tool).
   exported, settings saved.
 - **Status filters** — one-click chips scope a room's device grid to
   all / online / offline, and re-evaluate live as check results land.
+- **Composable dashboards** — build your own monitoring board from a widget
+  catalogue: KPI tiles, 24-hour **uptime and latency trend charts** (drawn
+  from the history database), offline / recorder / room-uptime lists. Layouts
+  persist per-user, refresh live with every sweep, and reset in one click.
+- **Cloud Sync** — point every workstation at one HTTPS URL (OneDrive /
+  SharePoint direct link, intranet server, Git raw) and sync the estate
+  config centrally. Downloads are schema-validated, cached locally for
+  offline-safe startup, and audited.
 - **Estate Overview** — a second top-level view (the "Overview" tab) that
   answers "how is the whole estate right now?" as a flat, single-column report:
   a headline stat strip (rooms, devices, online, offline, healthy rooms), a

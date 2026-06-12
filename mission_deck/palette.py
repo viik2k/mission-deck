@@ -172,9 +172,13 @@ class CommandPalette(ctk.CTkToplevel):
             app.open_shortcuts, "help keys hotkeys reference")
         add("Switch configuration", "open another config file", "folder", muted,
             app.switch_config_dialog, "config json file open switch")
+        add("Add dashboard widget", "widget catalogue", "dashboards", muted,
+            app.open_widget_picker, "dashboard board kpi trend compose")
         add("Go to Overview", "view", "overview", muted,
             lambda: app.navigate("overview"), "dashboard estate home")
         add("Go to Rooms", "view", "rooms", muted, lambda: app.navigate("rooms"))
+        add("Go to Dashboards", "view", "dashboards", muted,
+            lambda: app.navigate("dashboards"), "board widgets")
         add("Go to Plugins", "view", "plugins", muted, lambda: app.navigate("plugins"))
 
         for r in app.site.rooms:

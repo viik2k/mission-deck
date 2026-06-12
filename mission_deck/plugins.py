@@ -2,16 +2,14 @@
 
 A GUI surface over the registries that already exist in the codebase —
 **monitors** (how a device's reachability is judged, see ``network.py``'s
-monitor registry), **device commands**, and the conceptual **config sources**
-& **notifiers**. Each real extension is a single decorator away; this screen is
-where an operator enables and configures them.
+monitor registry), **device commands**, and **config sources**. Each extension
+is a single decorator (or catalogue entry) away; this screen is where an
+operator enables and configures them.
 
-This is intentionally a *preview*, not a finished marketplace: only the
-mechanics that drive the rest of the app are wired up. Activating a plugin that
-contributes a nav tab (today: **Cloud Sync**) makes that tab appear in the
-top nav bar — that is the "downloaded plugins show up in the nav" behaviour.
-Everything else is eye candy with a "coming soon" badge so the shape of the
-final screen is visible without pretending the integrations exist yet.
+Built-in monitors ship always-on. Activating a plugin that contributes a nav
+tab (today: **Cloud Sync**, a working HTTPS config source) makes that tab
+appear in the top nav bar; deactivating removes it. Activation state persists
+per-user in ``AppState.enabled_plugins``.
 """
 
 from __future__ import annotations
@@ -58,8 +56,9 @@ PLUGINS: list[PluginSpec] = [
     PluginSpec(
         id="cloud_sync", name="Cloud Sync", by="mission-deck core", icon="cloud",
         accent="#2b9be6",
-        desc="Store config.json in OneDrive / SharePoint so every operator "
-             "workstation loads the same estate.",
+        desc="Pull config.json from a central HTTPS URL (OneDrive/SharePoint "
+             "direct link, intranet, Git raw) so every operator workstation "
+             "loads the same estate. Validated, cached locally, audited.",
         tags=["config", "cloud"], tile=("cloud", "Cloud Sync", "cloud"),
     ),
     PluginSpec(
@@ -218,11 +217,10 @@ class PluginsView(ctk.CTkScrollableFrame):
 
         note = spec_note(
             self,
-            "Plugins extend three registries already in the codebase — monitors, "
-            "device commands, and the planned config sources & notifiers. Activate "
-            "a plugin to drop its tab into the top nav bar; the marketplace below "
-            "is a "
-            "preview.  (Coming soon.)",
+            "Plugins extend registries already in the codebase — monitors, device "
+            "commands and config sources. Built-in monitors are always on; toggle "
+            "anything else and its nav tab appears or disappears instantly. New "
+            "monitor types are one @register_monitor decorator away.",
         )
         note.grid(row=1, column=0, sticky="ew", pady=(0, GAP))
 

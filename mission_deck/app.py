@@ -40,10 +40,11 @@ from mission_deck import __app_name__, __version__
 from mission_deck.browser import BrowserConfig, open_urls
 from mission_deck.cloud import CloudView
 from mission_deck.dashboard import DashboardView
+from mission_deck.dashboards import DashboardsView
 from mission_deck.history import HistoryStore, Sample
 from mission_deck.icons import category_icon_name, icon
 from mission_deck.logging_setup import audit, current_user, log_location, setup_logging
-from mission_deck.plugins import PluginsView, plugin_by_id, spec_note, tile_plugins
+from mission_deck.plugins import PluginsView, plugin_by_id, tile_plugins
 from mission_deck import report
 from mission_deck.controls import DeviceControl, controls_for
 from mission_deck.editors import (
@@ -1182,7 +1183,7 @@ class App(ctk.CTk):
         self._view_frames: dict[str, ctk.CTkFrame] = {}
         self._plugins_view: PluginsView | None = None
         self._cloud_view: CloudView | None = None
-        self._dashboards_view: ctk.CTkFrame | None = None
+        self._dashboards_view: DashboardsView | None = None
         self._palette: CommandPalette | None = None
 
         self._build_navbar()        # row 0: brand + tabs + global actions
@@ -1396,6 +1397,7 @@ class App(ctk.CTk):
         self._action_host.grid(row=0, column=1, sticky="e", padx=(0, PAD))
         self._build_room_actions(self._action_host)
         self._build_overview_actions(self._action_host)
+        self._build_dashboards_actions(self._action_host)
 
     def _build_room_actions(self, host) -> None:
         frame = ctk.CTkFrame(host, fg_color="transparent")
@@ -1458,6 +1460,41 @@ class App(ctk.CTk):
         )
         self._ov_sweep_label.pack(side="right", padx=(0, GAP + 4))
 
+    def _build_dashboards_actions(self, host) -> None:
+        frame = ctk.CTkFrame(host, fg_color="transparent")
+        self._dashboards_actions = frame
+        ctk.CTkButton(
+            frame, text="+ WIDGET", width=110, height=32,
+            font=font(11, mono=True, weight="bold"), command=self.open_widget_picker,
+            **BTN_SOLID,
+        ).pack(side="right")
+        ctk.CTkButton(
+            frame, text="RESET LAYOUT", width=120, height=32,
+            font=font(11, mono=True), command=self._reset_dashboard_layout,
+            **style(BTN_OUTLINE, text_color=COLORS["text_muted"]),
+        ).pack(side="right", padx=(0, GAP))
+
+    def open_widget_picker(self) -> None:
+        """Jump to the Dashboards board and open the widget catalogue."""
+
+        self.navigate("dashboards")
+        if self._dashboards_view is not None:
+            self._dashboards_view.open_picker()
+
+    def _reset_dashboard_layout(self) -> None:
+        if self._dashboards_view is None:
+            return
+        if messagebox.askyesno(
+            __app_name__, "Reset the dashboard to the default layout?", parent=self
+        ):
+            self._dashboards_view.reset_layout()
+
+    def _refresh_dashboards_board(self) -> None:
+        """Repaint the custom board when it is the active view (cheap guard)."""
+
+        if self._dashboards_view is not None and self._current_view == "dashboards":
+            self._dashboards_view.refresh()
+
     # ------------------------------------------------------------------ #
     # View router
     # ------------------------------------------------------------------ #
@@ -1485,6 +1522,8 @@ class App(ctk.CTk):
         self._showing_dashboard = (view == "overview")
         if view == "overview":
             self._ensure_overview().refresh_if_stale()
+        elif view == "dashboards" and self._dashboards_view is not None:
+            self._dashboards_view.refresh_if_stale()
         self._update_topbar()
         self._update_nav_highlight(old_view)
 
@@ -1516,38 +1555,9 @@ class App(ctk.CTk):
         elif view == "cloud":
             frame = CloudView(self._views, self)
         else:
-            frame = self._build_dashboards_placeholder()
+            frame = DashboardsView(self._views, self)
+            self._dashboards_view = frame
         self._view_frames[view] = frame
-        return frame
-
-    def _build_dashboards_placeholder(self) -> ctk.CTkFrame:
-        frame = ctk.CTkScrollableFrame(self._views, fg_color="transparent")
-        frame.grid_columnconfigure(0, weight=1)
-        note = spec_note(
-            frame,
-            "Custom dashboards are user-composed from a widget palette bound to "
-            "live estate data (KPIs, gauges, device lists, latency series, recorder "
-            "state). Layouts persist per-user alongside settings in state.json.  "
-            "(Coming soon.)",
-        )
-        note.grid(row=0, column=0, sticky="ew", pady=(0, GAP))
-        placeholder = ctk.CTkFrame(
-            frame, corner_radius=CORNER_LG, fg_color=COLORS["card"],
-            border_width=1, border_color=COLORS["border"], height=280,
-        )
-        placeholder.grid(row=1, column=0, sticky="nsew")
-        ctk.CTkLabel(
-            placeholder, text="", image=icon("dashboards", 44, COLORS["ghost"]),
-        ).pack(pady=(70, 6))
-        ctk.CTkLabel(
-            placeholder, text="Composable dashboards are coming soon",
-            font=font(15, weight="bold"), text_color=COLORS["text"],
-        ).pack()
-        ctk.CTkLabel(
-            placeholder, text="Drag widgets from a palette to build estate-health, "
-            "recording-compliance, and network-latency views.",
-            font=font(12), text_color=COLORS["text_muted"],
-        ).pack(pady=(2, 0))
         return frame
 
     def _update_topbar(self) -> None:
@@ -1562,11 +1572,14 @@ class App(ctk.CTk):
         self._crumb.configure(text=crumb)
         self._room_actions.grid_remove()
         self._overview_actions.grid_remove()
+        self._dashboards_actions.grid_remove()
         if self._current_view == "rooms":
             self._room_actions.grid(row=0, column=0, sticky="e")
         elif self._current_view == "overview":
             self._overview_actions.grid(row=0, column=0, sticky="e")
             self._refresh_overview_sweep_label()
+        elif self._current_view == "dashboards":
+            self._dashboards_actions.grid(row=0, column=0, sticky="e")
 
     def _set_overview_sweeping(self, sweeping: bool) -> None:
         """Reflect an in-progress estate sweep in the overview topbar controls."""
@@ -2304,6 +2317,7 @@ class App(ctk.CTk):
         if self._dashboard is not None:
             self._dashboard.set_sweeping(False)
             self._dashboard.refresh()
+        self._refresh_dashboards_board()
         # Persist the batch off the UI thread (SQLite write is best-effort).
         samples = self._sweep_samples
         self._sweep_samples = []
@@ -2637,9 +2651,10 @@ class App(ctk.CTk):
             # final statuses are in.
             if self._room_filter != "all" and self.current_room is room:
                 self._render_room(room)
-            # If the dashboard is open behind a check, keep it current.
+            # If the overview / custom board is open behind a check, keep it current.
             if self._showing_dashboard:
                 self._refresh_dashboard()
+            self._refresh_dashboards_board()
 
     # ------------------------------------------------------------------ #
     # Effective settings (state overrides config)

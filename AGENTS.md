@@ -36,6 +36,8 @@ python -m mission_deck
   - `browser.py` — launch URLs in configured browser via subprocess (Chromium gets `--new-window`)
   - `history.py` — best-effort SQLite uptime-history store (samples per sweep; per-device/per-room uptime %)
   - `dashboard.py` — estate-wide Overview view (KPIs, attention/recorders/uptime/activity panels); pure presentation
+  - `dashboards.py` — composable Dashboards board (widget catalogue, per-user layout in state.json); pure presentation
+  - `cloud.py` — Cloud Sync view: pull config.json from an HTTPS URL via `config.fetch_remote_config`, cache locally, soft-restart onto it
   - `state.py` — persisted `AppState` (recent configs, settings overrides, dashboard poll prefs)
   - `theme.py` — color palette + sizing tokens
   - `logging_setup.py` — diagnostic + audit logging; installs crash-capturing excepthooks

@@ -32,13 +32,14 @@ Each module has one job and strict constraints:
 
 | Module | Job | Key constraint |
 |--------|-----|----------------|
-| `config.py` | Locate/load/validate JSON config | No GUI, no device internals |
+| `config.py` | Locate/load/validate JSON config; fetch+cache a remote config (`fetch_remote_config` → `cloud-config.json`, stdlib urllib) | No GUI, no device internals |
 | `models.py` | Typed data models + device registry | No I/O, no GUI, no networking |
 | `network.py` | Async device probes (monitor registry) + HTTP/TCP control transports | No GUI; thread-safe; results via callback |
 | `controls.py` | Build per-device control action lists | Config-driven; delegates I/O to `network.py` |
 | `browser.py` | Open URLs in configured browser | Launches subprocess/webbrowser; no models |
 | `history.py` | Persisted uptime-history store (SQLite) | Stdlib `sqlite3` only; best-effort; never raises into callers |
 | `dashboard.py` | Estate-wide overview view (flat report: stat strip + attention/recorders/uptime/activity sections) | Presentation only; reads `Site`/`HistoryStore`; no networking; UI thread |
+| `dashboards.py` | Composable dashboards: widget catalogue (`WidgetSpec`/`WIDGETS`) + user-ordered board persisted in `AppState.dashboard_widgets` | Presentation only; same constraints as `dashboard.py`; full rebuild on refresh (boards are small) |
 | `report.py` | Estate status report export (CSV: per-device status, latency, 24h uptime) | Pure data-out; no GUI/networking; UI picks the path and runs it off the Tk thread |
 | `state.py` | Persisted user preferences + recent files | Best-effort JSON; never breaks app if corrupt |
 | `theme.py` | Colour and sizing constants | Pure constants, no logic |
@@ -48,7 +49,7 @@ Each module has one job and strict constraints:
 | `logging_setup.py` | Centralised diagnostic + audit logging | Stdlib only; idempotent; never raises into callers |
 | `icons.py` | Vector icon factory (CTkImage) | Presentation only |
 | `plugins.py` | Plugins screen + plugin catalogue (`PluginSpec`) | Presentation + static catalogue; activation state lives in `AppState` |
-| `cloud.py` | Cloud Sync view (config-source preview, plugin-gated) | Presentation only; no real Graph client yet |
+| `cloud.py` | Cloud Sync view (HTTPS config source, plugin-gated) | Presentation + callbacks; download/validate/cache lives in `config.fetch_remote_config`, run off-thread via `app.run_background`; loads via soft-restart |
 | `editors.py` | Room / device / command editor dialogs | Presentation; writes back through `App` save paths |
 | `app.py` | CustomTkinter UI + event orchestration | Marshals network results to UI thread |
 
@@ -118,6 +119,14 @@ data hasn't changed (or an estate with hundreds of offline devices) doesn't
 rebuild thousands of widgets. The overview topbar also offers **EXPORT** — a
 CSV status report via `report.py` (written off the Tk thread; audited as
 `report.export`).
+
+The **Dashboards** tab (`dashboards.py`) is the user-composed counterpart: a
+board of widgets (KPI tiles, 24h uptime/latency trend bars via
+`history.uptime_buckets`/`latency_buckets`, offline/recorder/room-uptime/activity
+lists) added from a catalogue dialog, reordered/removed in place, and persisted
+as an ordered id list in `AppState.dashboard_widgets` (`None` = default
+starter board). It refreshes when a sweep/check finishes while it is the
+active view, and on navigate (throttled), mirroring the overview.
 
 `App.run_estate_sweep()` probes **all** rooms (`site.all_devices()`) using the
 same worker/queue/`after()` pattern as a room check but on its own queue +

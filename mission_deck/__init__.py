@@ -5,5 +5,5 @@ all device/room configuration is loaded at runtime from an external
 ``config.json`` (never committed). See ``config.example.json`` for the schema.
 """
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 __app_name__ = "mission-deck"
