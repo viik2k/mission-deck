@@ -32,23 +32,48 @@ Each module has one job and strict constraints:
 
 | Module | Job | Key constraint |
 |--------|-----|----------------|
-| `config.py` | Locate/load/validate JSON config | No GUI, no device internals |
+| `config.py` | Locate/load/validate JSON config; fetch+cache a remote config (`fetch_remote_config` → `cloud-config.json`, stdlib urllib) | No GUI, no device internals |
 | `models.py` | Typed data models + device registry | No I/O, no GUI, no networking |
 | `network.py` | Async device probes (monitor registry) + HTTP/TCP control transports | No GUI; thread-safe; results via callback |
 | `controls.py` | Build per-device control action lists | Config-driven; delegates I/O to `network.py` |
 | `browser.py` | Open URLs in configured browser | Launches subprocess/webbrowser; no models |
 | `history.py` | Persisted uptime-history store (SQLite) | Stdlib `sqlite3` only; best-effort; never raises into callers |
 | `dashboard.py` | Estate-wide overview view (flat report: stat strip + attention/recorders/uptime/activity sections) | Presentation only; reads `Site`/`HistoryStore`; no networking; UI thread |
+| `dashboards.py` | Composable dashboards: widget catalogue (`WidgetSpec`/`WIDGETS`) + user-ordered board persisted in `AppState.dashboard_widgets` | Presentation only; same constraints as `dashboard.py`; full rebuild on refresh (boards are small) |
 | `report.py` | Estate status report export (CSV: per-device status, latency, 24h uptime) | Pure data-out; no GUI/networking; UI picks the path and runs it off the Tk thread |
 | `state.py` | Persisted user preferences + recent files | Best-effort JSON; never breaks app if corrupt |
 | `theme.py` | Colour and sizing constants | Pure constants, no logic |
 | `ui.py` | Cached shared fonts, button/switch style tokens, `PromptDialog` | All views use `ui.font()` (never raw `CTkFont`), the `BTN_*`/`SWITCH` tokens, and `PromptDialog` (never `CTkInputDialog`); cache resets per Tk root |
+| `palette.py` | Global command palette (Ctrl+K): fuzzy jump to rooms/devices/actions | Presentation only; items built from live `Site` on open; every action is a callback into `App` |
+| `toast.py` | Non-blocking toast notifications (bottom-right stack) | Presentation only; no I/O; callers pass finished strings; capped stack, auto-dismiss |
 | `logging_setup.py` | Centralised diagnostic + audit logging | Stdlib only; idempotent; never raises into callers |
 | `icons.py` | Vector icon factory (CTkImage) | Presentation only |
 | `plugins.py` | Plugins screen + plugin catalogue (`PluginSpec`) | Presentation + static catalogue; activation state lives in `AppState` |
-| `cloud.py` | Cloud Sync view (config-source preview, plugin-gated) | Presentation only; no real Graph client yet |
+| `cloud.py` | Cloud Sync view (HTTPS config source, plugin-gated) | Presentation + callbacks; download/validate/cache lives in `config.fetch_remote_config`, run off-thread via `app.run_background`; loads via soft-restart |
 | `editors.py` | Room / device / command editor dialogs | Presentation; writes back through `App` save paths |
 | `app.py` | CustomTkinter UI + event orchestration | Marshals network results to UI thread |
+
+### Window shell (top navigation)
+
+The window stacks, top to bottom: a **top nav bar** (brand mark, labelled view
+tabs with an accent active-underline, a live "N OFFLINE" attention badge that
+jumps to the overview, the Ctrl+K search button, settings, and the operator
+chip), a slim **context bar** (breadcrumb + per-view actions, swapped on
+navigate), then the active view. There is no left icon rail — navigation is
+horizontal. Plugin-contributed views (e.g. Cloud Sync) add/remove their nav
+tab at runtime via `App._add_nav_tab`/`_remove_nav_tab`. Global shortcuts:
+Ctrl+K / Ctrl+P command palette, Ctrl+1..4 view switching, Ctrl+F room filter,
+F5 re-probe the current view (room check or estate sweep), Ctrl+, settings,
+F1 shortcut reference (`ShortcutsDialog`).
+
+Cross-cutting shell behaviour: background outcomes surface as **toasts**
+(`toast.py` — sweep complete, devices *newly* offline since the previous sweep
+via `App._notify_sweep_result`, report exported, settings saved); the room view
+has **status filter chips** (all/online/offline, `App.set_room_filter`) that
+re-evaluate membership when a check or sweep lands; the estate sweep shows live
+`sweeping N/M…` progress in the overview context bar; and the window geometry
+(or maximised state) persists across sessions in `AppState.window_geometry`
+(captured in `App.destroy`).
 
 ### Data model hierarchy
 
@@ -82,7 +107,7 @@ single decorator — no caller changes.
 
 The **Overview** (`dashboard.py`) is a second top-level view, swapped with the
 room panel in the same grid cell (`App.show_dashboard()` / `show_room_view()`;
-sidebar "⌂ Overview" button). It is deliberately **not** a bento grid of boxed
+"OVERVIEW" tab in the top nav bar). It is deliberately **not** a bento grid of boxed
 cards: it renders as a flat, single-column report — a bare stat strip (rooms /
 devices / online / offline / healthy), then hairline-ruled sections for
 attention (offline devices), recorders, per-room 24h uptime and a
@@ -94,6 +119,14 @@ data hasn't changed (or an estate with hundreds of offline devices) doesn't
 rebuild thousands of widgets. The overview topbar also offers **EXPORT** — a
 CSV status report via `report.py` (written off the Tk thread; audited as
 `report.export`).
+
+The **Dashboards** tab (`dashboards.py`) is the user-composed counterpart: a
+board of widgets (KPI tiles, 24h uptime/latency trend bars via
+`history.uptime_buckets`/`latency_buckets`, offline/recorder/room-uptime/activity
+lists) added from a catalogue dialog, reordered/removed in place, and persisted
+as an ordered id list in `AppState.dashboard_widgets` (`None` = default
+starter board). It refreshes when a sweep/check finishes while it is the
+active view, and on navigate (throttled), mirroring the overview.
 
 `App.run_estate_sweep()` probes **all** rooms (`site.all_devices()`) using the
 same worker/queue/`after()` pattern as a room check but on its own queue +

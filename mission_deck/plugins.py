@@ -2,16 +2,14 @@
 
 A GUI surface over the registries that already exist in the codebase —
 **monitors** (how a device's reachability is judged, see ``network.py``'s
-monitor registry), **device commands**, and the conceptual **config sources**
-& **notifiers**. Each real extension is a single decorator away; this screen is
-where an operator enables and configures them.
+monitor registry), **device commands**, and **config sources**. Each extension
+is a single decorator (or catalogue entry) away; this screen is where an
+operator enables and configures them.
 
-This is intentionally a *preview*, not a finished marketplace: only the
-mechanics that drive the rest of the app are wired up. Activating a plugin that
-contributes a nav tile (today: **Cloud Sync**) makes that tile appear in the
-left rail — that is the "downloaded plugins show up in the sidebar" behaviour.
-Everything else is eye candy with a "coming soon" badge so the shape of the
-final screen is visible without pretending the integrations exist yet.
+Built-in monitors ship always-on. Activating a plugin that contributes a nav
+tab (today: **Cloud Sync**, a working HTTPS config source) makes that tab
+appear in the top nav bar; deactivating removes it. Activation state persists
+per-user in ``AppState.enabled_plugins``.
 """
 
 from __future__ import annotations
@@ -35,7 +33,7 @@ from mission_deck.ui import font
 class PluginSpec:
     """Static description of a plugin shown on the Plugins screen.
 
-    ``tile`` — when set, ``(view_key, label, icon)`` for a rail button that
+    ``tile`` — when set, ``(view_key, label, icon)`` for a nav-bar tab that
     appears only while the plugin is enabled. ``builtin`` plugins are always on
     and cannot be toggled (the tcp/http monitors that already ship).
     """
@@ -53,13 +51,14 @@ class PluginSpec:
 
 
 # The plugin catalogue. Today this is the source of truth for both the Plugins
-# screen and the rail tiles; a real loader would discover these instead.
+# screen and the nav tabs; a real loader would discover these instead.
 PLUGINS: list[PluginSpec] = [
     PluginSpec(
         id="cloud_sync", name="Cloud Sync", by="mission-deck core", icon="cloud",
         accent="#2b9be6",
-        desc="Store config.json in OneDrive / SharePoint so every operator "
-             "workstation loads the same estate.",
+        desc="Pull config.json from a central HTTPS URL (OneDrive/SharePoint "
+             "direct link, intranet, Git raw) so every operator workstation "
+             "loads the same estate. Validated, cached locally, audited.",
         tags=["config", "cloud"], tile=("cloud", "Cloud Sync", "cloud"),
     ),
     PluginSpec(
@@ -95,7 +94,7 @@ def plugin_by_id(plugin_id: str) -> PluginSpec | None:
 
 
 def tile_plugins() -> list[PluginSpec]:
-    """Plugins that contribute a rail tile when enabled."""
+    """Plugins that contribute a nav-bar tab when enabled."""
 
     return [spec for spec in PLUGINS if spec.tile is not None]
 
@@ -218,10 +217,10 @@ class PluginsView(ctk.CTkScrollableFrame):
 
         note = spec_note(
             self,
-            "Plugins extend three registries already in the codebase — monitors, "
-            "device commands, and the planned config sources & notifiers. Activate "
-            "a plugin to drop its tile into the rail; the marketplace below is a "
-            "preview.  (Coming soon.)",
+            "Plugins extend registries already in the codebase — monitors, device "
+            "commands and config sources. Built-in monitors are always on; toggle "
+            "anything else and its nav tab appears or disappears instantly. New "
+            "monitor types are one @register_monitor decorator away.",
         )
         note.grid(row=1, column=0, sticky="ew", pady=(0, GAP))
 
@@ -263,7 +262,7 @@ class PluginsView(ctk.CTkScrollableFrame):
         ).grid(row=0, column=1, sticky="ew", padx=(0, PAD), pady=(PAD, 0))
         ctk.CTkLabel(
             hero, text="Activate a plugin to add monitors, notifiers and config "
-            "sources. Tiles for what you turn on appear in the rail.",
+            "sources. Tabs for what you turn on appear in the top nav bar.",
             anchor="w", justify="left", wraplength=720,
             font=font(12), text_color=COLORS["text_muted"],
         ).grid(row=1, column=1, sticky="ew", padx=(0, PAD), pady=(2, PAD))

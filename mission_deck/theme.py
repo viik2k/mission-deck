@@ -23,7 +23,7 @@ from mission_deck.models import DeviceStatus, RecordingStatus
 COLORS: dict[str, str] = {
     # Surfaces
     "bg":            "#000000",  # OLED black
-    "rail":          "#111111",  # left icon rail
+    "rail":          "#111111",  # top navigation bar
     "panel":         "#111111",  # main content panel
     "header":        "#111111",  # top bar (alias of panel)
     "sidebar":       "#111111",  # room-list sidebar
@@ -129,9 +129,9 @@ FONT_UI = "Segoe UI"
 # --------------------------------------------------------------------------- #
 # Sizing / layout tokens
 # --------------------------------------------------------------------------- #
-RAIL_WIDTH    = 56             # narrow icon rail
+NAV_HEIGHT    = 52             # top navigation bar (brand + tabs + global actions)
 SIDEBAR_WIDTH = 240            # room-list sidebar
-TOPBAR_HEIGHT = 48             # shared breadcrumb / action bar
+TOPBAR_HEIGHT = 44             # context bar (breadcrumb + per-view actions)
 CARD_MIN_WIDTH = 280
 CARD_HEIGHT   = 88             # compact device tile
 GRID_COLUMNS  = 3

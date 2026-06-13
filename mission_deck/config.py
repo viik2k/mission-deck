@@ -23,6 +23,8 @@ import json
 import logging
 import os
 import sys
+import urllib.error
+import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -35,6 +37,9 @@ SUPPORTED_SCHEMA_VERSION = 1
 
 CONFIG_FILENAME = "config.json"
 EXAMPLE_CONFIG_FILENAME = "config.example.json"
+# Where a cloud-synced config is cached locally (in the per-user directory),
+# so the estate keeps loading even when the source URL is unreachable.
+CLOUD_CONFIG_FILENAME = "cloud-config.json"
 
 
 # --------------------------------------------------------------------------- #
@@ -164,6 +169,59 @@ def example_config_path() -> Path:
     """Location of the bundled dummy-data example config (PyInstaller-aware)."""
 
     return resource_path(EXAMPLE_CONFIG_FILENAME)
+
+
+def cloud_config_path() -> Path:
+    """Local cache location for a cloud-synced config (per-user directory)."""
+
+    return _user_config_dir() / CLOUD_CONFIG_FILENAME
+
+
+def fetch_remote_config(url: str, dest: Path | None = None, timeout: float = 15.0) -> Path:
+    """Download a config from an HTTPS/HTTP URL, validate it, cache it locally.
+
+    The payload is parsed and structurally validated *before* anything is
+    written, then saved atomically via :func:`save_config` — a bad or truncated
+    download can never clobber the last-good cached copy. Returns the cached
+    path on success.
+
+    Raises
+    ------
+    ConfigError
+        The URL is not http(s), unreachable, or returns a non-JSON payload.
+    ConfigValidationError
+        The payload is JSON but not a valid mission-deck config.
+    """
+
+    cleaned = (url or "").strip()
+    if not cleaned.lower().startswith(("https://", "http://")):
+        raise ConfigError("The config source must be an http(s):// URL.")
+    target = dest if dest is not None else cloud_config_path()
+
+    request = urllib.request.Request(
+        cleaned, headers={"User-Agent": "mission-deck", "Accept": "application/json"}
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            payload = response.read()
+    except (urllib.error.URLError, OSError, ValueError) as exc:
+        reason = getattr(exc, "reason", None) or exc
+        logger.warning("Could not fetch remote config %s: %s", cleaned, reason)
+        raise ConfigError(f"Could not fetch the config: {reason}") from exc
+
+    try:
+        data = json.loads(payload.decode("utf-8-sig"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        logger.warning("Remote config %s is not valid JSON: %s", cleaned, exc)
+        raise ConfigParseError(
+            "The URL did not return valid JSON. For OneDrive/SharePoint, use a "
+            "direct-download link, not the share page."
+        ) from exc
+
+    # save_config re-validates structure and writes atomically.
+    saved = save_config(target, data)
+    logger.info("Fetched remote config from %s -> %s", cleaned, saved)
+    return saved
 
 
 # --------------------------------------------------------------------------- #

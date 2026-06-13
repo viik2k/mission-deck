@@ -56,6 +56,15 @@ class AppState:
     dashboard_poll_enabled: bool = False  # background estate-wide status sweeps
     dashboard_poll_seconds: int = 120     # interval between background sweeps
     history_retention_days: int = 30      # prune uptime samples older than this
+    # Last window geometry ("WxH+X+Y", or "zoomed"); restored on next launch.
+    window_geometry: str = ""
+    # Custom dashboard layout: ordered widget ids (see dashboards.WIDGETS).
+    # None = never customised, so the view seeds its starter layout.
+    dashboard_widgets: list[str] | None = None
+    # Cloud Sync: the HTTPS source the cached cloud-config.json is pulled from,
+    # and an ISO timestamp of the last successful sync (display only).
+    cloud_config_url: str = ""
+    cloud_last_sync: str = ""
 
     # ------------------------------------------------------------------ #
     def __post_init__(self) -> None:
@@ -87,6 +96,18 @@ class AppState:
                 setattr(self, attr, bool(getattr(self, attr)))
         if not isinstance(self.browser_path, str):
             self.browser_path = ""
+        if not isinstance(self.window_geometry, str):
+            self.window_geometry = ""
+        if self.dashboard_widgets is not None:
+            if isinstance(self.dashboard_widgets, list):
+                self.dashboard_widgets = [
+                    str(w) for w in self.dashboard_widgets if isinstance(w, str)
+                ]
+            else:
+                self.dashboard_widgets = None
+        for attr in ("cloud_config_url", "cloud_last_sync"):
+            if not isinstance(getattr(self, attr), str):
+                setattr(self, attr, "")
         if self.last_config_path is not None and not isinstance(self.last_config_path, str):
             self.last_config_path = None
         if self.appearance not in ("dark", "light", "system"):
