@@ -62,6 +62,14 @@ PLUGINS: list[PluginSpec] = [
         tags=["config", "cloud"], tile=("cloud", "Cloud Sync", "cloud"),
     ),
     PluginSpec(
+        id="activity_log", name="Activity Log", by="mission-deck core", icon="clock",
+        accent=COLORS["accent2"],
+        desc="A browsable, filterable window onto the audit trail — who ran which "
+             "command, on which device, when, and whether it succeeded. Reads the "
+             "local audit.log only; nothing leaves the workstation.",
+        tags=["audit", "compliance"], tile=("activity", "Activity", "clock"),
+    ),
+    PluginSpec(
         id="monitor_tcp", name="TCP Monitor", by="mission-deck core", icon="pulse",
         accent=COLORS["accent"], builtin=True, badge="Built-in",
         desc="Default reachability check — opens a TCP connection to the "
@@ -79,6 +87,15 @@ PLUGINS: list[PluginSpec] = [
         icon="pulse", accent=COLORS["warn"], builtin=True, badge="Built-in",
         desc="One ICMP echo via the system ping command — for devices with no "
              "open TCP port. Opt in per device with \"monitor\": \"ping\".",
+        tags=["monitor"],
+    ),
+    PluginSpec(
+        id="monitor_tls", name="TLS / Certificate Monitor", by="mission-deck core",
+        icon="external", accent=COLORS["accent2"], builtin=True, badge="Built-in",
+        desc="Confirms a device completes a TLS handshake on its HTTPS port — a "
+             "stronger signal than an open socket for web-managed gear. Opt in "
+             "per device with \"monitor\": \"tls\"; set \"verify_tls\": true to "
+             "require a valid certificate.",
         tags=["monitor"],
     ),
 ]

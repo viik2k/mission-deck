@@ -235,6 +235,64 @@ async def _ping_monitor(device: Device, timeout: float) -> CheckResult:
     return CheckResult(device.id, DeviceStatus.ONLINE, latency_ms, None)
 
 
+@register_monitor("tls", "ssl")
+async def _tls_monitor(device: Device, timeout: float) -> CheckResult:
+    """Probe a device by completing a TLS handshake on its HTTPS port.
+
+    For web-managed gear (codec admin pages, recorder UIs) where an open TCP
+    port is a weaker signal than "it actually negotiates TLS". A successful
+    handshake → ONLINE (with connect+handshake latency); a refused/timed-out
+    connection or a failed handshake → OFFLINE. Opt in with ``"monitor": "tls"``.
+
+    Port resolution: an explicit ``tls_port`` config key, else the device's
+    ``port``, else 443. By default the certificate is *not* verified — courtroom
+    devices routinely present self-signed certs on the LAN, and we only want to
+    know the box is alive and speaking TLS. Set ``"verify_tls": true`` to make a
+    certificate that fails validation (untrusted/expired/wrong host) OFFLINE.
+    """
+
+    raw_port = device.extra.get("tls_port", device.port)
+    try:
+        port = int(raw_port)
+    except (TypeError, ValueError):
+        port = device.port
+    if not port:
+        port = 443
+
+    verify = bool(device.extra.get("verify_tls", False))
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    if not verify:
+        # Handshake-only liveness: don't reject self-signed / mismatched certs.
+        context.check_hostname = False
+        context.verify_mode = ssl.CERT_NONE
+
+    start = time.perf_counter()
+    try:
+        connect = asyncio.open_connection(
+            device.host, port, ssl=context, server_hostname=device.host
+        )
+        _reader, writer = await asyncio.wait_for(connect, timeout=timeout)
+    except asyncio.TimeoutError:
+        logger.debug("TLS probe %s (%s:%s) timed out after %.1fs", device.id, device.host, port, timeout)
+        return CheckResult(device.id, DeviceStatus.OFFLINE, None, "timed out")
+    except ssl.SSLCertVerificationError as exc:
+        # Subclass of SSLError/OSError — must be caught before the generic arm.
+        logger.debug("TLS probe %s (%s:%s) cert rejected: %s", device.id, device.host, port, exc)
+        return CheckResult(device.id, DeviceStatus.OFFLINE, None, f"certificate rejected: {exc.reason or exc}")
+    except (OSError, ssl.SSLError, asyncio.CancelledError) as exc:
+        logger.debug("TLS probe %s (%s:%s) failed: %s", device.id, device.host, port, exc)
+        return CheckResult(device.id, DeviceStatus.OFFLINE, None, str(exc) or "tls handshake failed")
+
+    latency_ms = (time.perf_counter() - start) * 1000.0
+    writer.close()
+    try:
+        await writer.wait_closed()
+    except OSError:
+        pass
+    logger.debug("TLS probe %s (%s:%s) online in %.0fms", device.id, device.host, port, latency_ms)
+    return CheckResult(device.id, DeviceStatus.ONLINE, latency_ms, None)
+
+
 async def check_device(device: Device, timeout: float) -> CheckResult:
     """Probe one device using its configured monitor (TCP connect by default)."""
 

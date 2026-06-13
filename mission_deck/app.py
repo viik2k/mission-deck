@@ -37,6 +37,7 @@ from tkinter import filedialog, messagebox
 import customtkinter as ctk
 
 from mission_deck import __app_name__, __version__
+from mission_deck.activity import ActivityView
 from mission_deck.browser import BrowserConfig, open_urls
 from mission_deck.cloud import CloudView
 from mission_deck.dashboard import DashboardView
@@ -1514,8 +1515,10 @@ class App(ctk.CTk):
         if view == "settings":
             self.open_settings()
             return
-        # The Cloud Sync screen only exists while its plugin is activated.
+        # Plugin-gated screens only exist while their plugin is activated.
         if view == "cloud" and not self.is_plugin_enabled("cloud_sync"):
+            view = "plugins"
+        if view == "activity" and not self.is_plugin_enabled("activity_log"):
             view = "plugins"
         frame = self._frame_for(view)
         if frame is None:
@@ -1548,6 +1551,8 @@ class App(ctk.CTk):
             return self._ensure_simple_view("plugins")
         if view == "cloud":
             return self._ensure_simple_view("cloud")
+        if view == "activity":
+            return self._ensure_simple_view("activity")
         if view == "dashboards":
             return self._ensure_simple_view("dashboards")
         return None
@@ -1566,6 +1571,8 @@ class App(ctk.CTk):
             frame = PluginsView(self._views, self)
         elif view == "cloud":
             frame = CloudView(self._views, self)
+        elif view == "activity":
+            frame = ActivityView(self._views, self)
         else:
             frame = DashboardsView(self._views, self)
             self._dashboards_view = frame
@@ -1575,7 +1582,7 @@ class App(ctk.CTk):
     def _update_topbar(self) -> None:
         titles = {
             "overview": "OVERVIEW", "rooms": "ROOMS", "dashboards": "DASHBOARDS",
-            "plugins": "PLUGINS", "cloud": "CLOUD SYNC",
+            "plugins": "PLUGINS", "cloud": "CLOUD SYNC", "activity": "ACTIVITY",
         }
         title = titles.get(self._current_view, "")
         crumb = f"MISSION-DECK  ›  {title}"
