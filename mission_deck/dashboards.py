@@ -1,8 +1,10 @@
 """Composable dashboards for mission-deck.
 
 The operator builds their own monitoring screen from a catalogue of widgets
-bound to live estate data: KPI tiles, offline/recorder lists, per-room uptime,
-and 24-hour uptime/latency trends drawn from the persisted history store. The
+bound to live estate data: KPI tiles, a radial health gauge, an estate-pulse
+wall (one status cell per device), offline/recorder/latency lists, a
+device-category mix, per-room uptime, and 24-hour uptime/latency trends drawn
+from the persisted history store. The
 layout (an ordered list of widget ids) persists per-user in ``state.json``
 (``AppState.dashboard_widgets``) so every operator can keep the board that
 matches their duty — a recording-compliance wall, a network-latency view, …
@@ -17,6 +19,7 @@ without a payoff.
 
 from __future__ import annotations
 
+import math
 import time
 import tkinter as tk
 from dataclasses import dataclass
@@ -30,11 +33,13 @@ from mission_deck.theme import (
     COLORS,
     CORNER,
     CORNER_LG,
+    FONT_MONO,
     GAP,
     KPI_BAD,
     KPI_GOOD,
     KPI_NEUTRAL,
     PAD,
+    STATUS_COLORS,
     recording_status_color,
     recording_status_label,
 )
@@ -69,9 +74,14 @@ WIDGETS: list[WidgetSpec] = [
     WidgetSpec("kpi_rooms", "Healthy rooms", "Rooms with every device online.", "rooms"),
     WidgetSpec("kpi_latency", "Average latency", "Mean probe latency right now.", "pulse"),
     WidgetSpec("kpi_recording", "Recording now", "Recorders currently capturing.", "record"),
+    WidgetSpec("kpi_uptime", "Estate uptime · 24h", "Average reachability over the day.", "clock"),
+    WidgetSpec("health_gauge", "Health gauge", "Live reachability as a radial gauge.", "pulse"),
+    WidgetSpec("status_grid", "Estate pulse", "Every device as a status cell — one wall.", "matrix", span=2),
     WidgetSpec("uptime_trend", "Uptime trend · 24h", "Estate reachability per hour.", "check", span=2),
     WidgetSpec("latency_trend", "Latency trend · 24h", "Average probe latency per hour.", "pulse", span=2),
     WidgetSpec("offline_list", "Needs attention", "Offline devices, worst rooms first.", "warn", span=2),
+    WidgetSpec("slowest_devices", "Slowest devices", "Highest live latency, worst first.", "bolt", span=2),
+    WidgetSpec("device_mix", "Device mix", "Estate composition by device category.", "server", span=2),
     WidgetSpec("recorders", "Recorders", "Recording state across the estate.", "record", span=2),
     WidgetSpec("room_uptime", "Room uptime · 24h", "Worst-performing rooms first.", "rooms", span=2),
     WidgetSpec("activity", "Recent activity", "Latest operator actions (audit log).", "clock", span=2),
@@ -79,9 +89,10 @@ WIDGETS: list[WidgetSpec] = [
 
 # The board a user sees before they customise anything.
 DEFAULT_LAYOUT: list[str] = [
-    "kpi_online", "kpi_offline", "kpi_latency", "kpi_recording",
+    "health_gauge", "kpi_uptime", "kpi_offline", "kpi_recording",
+    "status_grid", "device_mix",
     "uptime_trend", "latency_trend",
-    "offline_list", "room_uptime",
+    "offline_list", "slowest_devices",
 ]
 
 
@@ -139,6 +150,93 @@ class _MiniBar(tk.Canvas):
         up = int(width * max(0.0, min(100.0, pct)) / 100.0)
         if up > 0:
             self.create_rectangle(0, 0, up, height, fill=COLORS["online"], width=0)
+
+
+class _FillBar(tk.Canvas):
+    """A proportional fill over a faint track — colour supplied by the caller.
+
+    Unlike :class:`_MiniBar` (which encodes up/down with green-over-red), this
+    is a neutral magnitude bar: the fill width is ``frac`` of the track and the
+    colour means whatever the widget wants (azure for share-of-estate, a
+    latency threshold colour, …).
+    """
+
+    def __init__(self, master, frac: float, color: str,
+                 width: int = 120, height: int = 7):
+        super().__init__(master, width=width, height=height,
+                         highlightthickness=0, bd=0, bg=COLORS["card"])
+        self.create_rectangle(0, 0, width, height, fill=COLORS["card_2"], width=0)
+        fill = int(width * max(0.0, min(1.0, frac)))
+        if fill > 0:
+            self.create_rectangle(0, 0, fill, height, fill=color, width=0)
+
+
+class _GaugeRing(tk.Canvas):
+    """A 270° radial gauge: a faint track, a coloured value sweep, centred %.
+
+    The opening sits at the bottom; the sweep runs clockwise from the lower-left
+    over the top to the lower-right, so a full ring reads as 100%.
+    """
+
+    SIZE = 124
+    _START = 225      # degrees; lower-left
+    _EXTENT = -270    # clockwise sweep over the top
+
+    def __init__(self, master, pct: float | None, *, color: str, caption: str):
+        super().__init__(
+            master, width=self.SIZE, height=self.SIZE,
+            highlightthickness=0, bd=0, bg=COLORS["card"],
+        )
+        pad, thick = 13, 11
+        box = (pad, pad, self.SIZE - pad, self.SIZE - pad)
+        self.create_arc(*box, start=self._START, extent=self._EXTENT,
+                        style="arc", outline=COLORS["border_2"], width=thick)
+        if pct is not None and pct > 0:
+            frac = max(0.0, min(1.0, pct / 100.0))
+            self.create_arc(*box, start=self._START, extent=self._EXTENT * frac,
+                            style="arc", outline=color, width=thick)
+        cx = cy = self.SIZE / 2
+        self.create_text(
+            cx, cy - 3, text="—" if pct is None else f"{pct:.0f}%",
+            fill=COLORS["text_faint"] if pct is None else color,
+            font=(FONT_MONO, 21, "bold"),
+        )
+        self.create_text(
+            cx, cy + 19, text=caption,
+            fill=COLORS["text_faint"], font=(FONT_MONO, 8),
+        )
+
+
+class _StatusGrid(tk.Canvas):
+    """A wall of cells — one dot per device, coloured by reachability.
+
+    An estate-at-a-glance pulse: green/red/amber/grey cells laid out in a
+    roughly-landscape grid. Capped at :data:`MAX_CELLS` so a thousand-device
+    sweep can't grow an unbounded canvas (the widget notes the remainder).
+    """
+
+    CELL = 12
+    GAP = 4
+    MAX_CELLS = 480
+
+    def __init__(self, master, statuses: list[DeviceStatus]):
+        shown = statuses[:self.MAX_CELLS]
+        columns = min(40, max(8, math.ceil(math.sqrt(len(shown)) * 1.7)))
+        rows = max(1, math.ceil(len(shown) / columns))
+        step = self.CELL + self.GAP
+        width = max(self.CELL, columns * step - self.GAP)
+        height = max(self.CELL, rows * step - self.GAP)
+        super().__init__(
+            master, width=width, height=height,
+            highlightthickness=0, bd=0, bg=COLORS["card"],
+        )
+        for index, status in enumerate(shown):
+            r, c = divmod(index, columns)
+            x0, y0 = c * step, r * step
+            self.create_oval(
+                x0, y0, x0 + self.CELL, y0 + self.CELL,
+                fill=STATUS_COLORS.get(status, COLORS["unknown"]), width=0,
+            )
 
 
 # --------------------------------------------------------------------------- #
@@ -414,6 +512,37 @@ class DashboardsView(ctk.CTkScrollableFrame):
         self._kpi(body, f"{recording}/{len(recorders)}" if recorders else "—",
                   accent, "recorders capturing")
 
+    def _w_kpi_uptime(self, body) -> None:
+        values = self.app.history.uptime_buckets(TREND_WINDOW_S, TREND_BUCKETS)
+        known = [v for v in values if v is not None]
+        if not known:
+            self._kpi(body, "—", KPI_NEUTRAL, "no history yet")
+            return
+        avg = sum(known) / len(known)
+        accent = (KPI_GOOD if avg >= 99.0
+                  else COLORS["warn"] if avg >= 90.0 else KPI_BAD)
+        self._kpi(body, f"{avg:.1f}%", accent, "estate uptime · 24h")
+
+    def _w_health_gauge(self, body) -> None:
+        resolved = [d for d in self.app.site.all_devices() if d.status.is_resolved]
+        online = sum(1 for d in resolved if d.status is DeviceStatus.ONLINE)
+        pct = (online * 100.0 / len(resolved)) if resolved else None
+        if pct is None:
+            color = COLORS["text_faint"]
+        elif pct >= 99.0:
+            color = COLORS["online"]
+        elif pct >= 90.0:
+            color = COLORS["warn"]
+        else:
+            color = COLORS["offline"]
+        _GaugeRing(body, pct, color=color, caption="ONLINE").grid(
+            row=0, column=0, pady=(2, 0))
+        ctk.CTkLabel(
+            body,
+            text=f"{online}/{len(resolved)} reachable now" if resolved else "run a sweep",
+            font=font(10), text_color=COLORS["text_faint"],
+        ).grid(row=1, column=0, pady=(4, 0))
+
     def _w_uptime_trend(self, body) -> None:
         values = self.app.history.uptime_buckets(TREND_WINDOW_S, TREND_BUCKETS)
         if not any(v is not None for v in values):
@@ -486,6 +615,89 @@ class DashboardsView(ctk.CTkScrollableFrame):
                 recording_status_color(device.recording_status),
                 lambda r=room: self.app.open_room_from_dashboard(r),
             )
+
+    def _w_status_grid(self, body) -> None:
+        statuses = [d.status for d in self.app.site.all_devices()]
+        if not statuses:
+            self._empty(body, "No devices configured.")
+            return
+        _StatusGrid(body, statuses).grid(row=0, column=0, sticky="w")
+        online = sum(1 for s in statuses if s is DeviceStatus.ONLINE)
+        offline = sum(1 for s in statuses if s is DeviceStatus.OFFLINE)
+        pending = len(statuses) - online - offline
+        legend = (f"{online} online   ·   {offline} offline   ·   "
+                  f"{pending} unchecked   ·   1 cell = 1 device")
+        if len(statuses) > _StatusGrid.MAX_CELLS:
+            legend += f"   ·   first {_StatusGrid.MAX_CELLS} shown"
+        ctk.CTkLabel(
+            body, text=legend, anchor="w",
+            font=font(10, mono=True), text_color=COLORS["text_faint"],
+        ).grid(row=1, column=0, sticky="w", pady=(6, 0))
+
+    def _w_slowest_devices(self, body) -> None:
+        rows = [
+            (room, device)
+            for room in self.app.site.rooms
+            for device in room.devices
+            if device.last_latency_ms is not None
+            and device.status is DeviceStatus.ONLINE
+        ]
+        if not rows:
+            self._empty(body, "No latency readings yet — run a sweep.")
+            return
+        rows.sort(key=lambda rd: rd[1].last_latency_ms or 0.0, reverse=True)
+        top = rows[:MAX_ROWS]
+        vmax = max((d.last_latency_ms or 0.0) for _, d in top) or 1.0
+        for row, (room, device) in enumerate(top):
+            lat = device.last_latency_ms or 0.0
+            color = (COLORS["online"] if lat < 80.0
+                     else COLORS["warn"] if lat < 250.0 else COLORS["offline"])
+            line = ctk.CTkFrame(body, fg_color="transparent", corner_radius=CORNER)
+            line.grid(row=row, column=0, sticky="ew", pady=1)
+            line.grid_columnconfigure(0, weight=1)
+            name = ctk.CTkLabel(
+                line, text=device.name, anchor="w",
+                font=font(12), text_color=COLORS["text"],
+            )
+            name.grid(row=0, column=0, sticky="ew")
+            _FillBar(line, lat / vmax, color).grid(row=0, column=1, padx=(GAP, 8))
+            val = ctk.CTkLabel(
+                line, text=f"{lat:.0f} ms", width=58, anchor="e",
+                font=font(11, mono=True, weight="bold"), text_color=color,
+            )
+            val.grid(row=0, column=2)
+            for widget in (line, name, val):
+                widget.bind("<Button-1>", lambda _e, r=room: self.app.open_room_from_dashboard(r))
+                widget.configure(cursor="hand2")
+
+    def _w_device_mix(self, body) -> None:
+        groups: dict[str, list] = {}
+        for device in self.app.site.all_devices():
+            groups.setdefault(device.category, []).append(device)
+        if not groups:
+            self._empty(body, "No devices configured.")
+            return
+        ranked = sorted(groups.items(), key=lambda kv: len(kv[1]), reverse=True)
+        most = max(len(devs) for _, devs in ranked)
+        for row, (category, devs) in enumerate(ranked[:MAX_ROWS]):
+            offline = sum(1 for d in devs if d.status is DeviceStatus.OFFLINE)
+            line = ctk.CTkFrame(body, fg_color="transparent")
+            line.grid(row=row, column=0, sticky="ew", pady=1)
+            line.grid_columnconfigure(0, weight=1)
+            ctk.CTkLabel(
+                line, text=category, anchor="w",
+                font=font(12), text_color=COLORS["text"],
+            ).grid(row=0, column=0, sticky="ew")
+            _FillBar(line, len(devs) / most, COLORS["info"]).grid(
+                row=0, column=1, padx=(GAP, 8))
+            count = f"{len(devs)}" + (f"  ({offline}↓)" if offline else "")
+            ctk.CTkLabel(
+                line, text=count, width=64, anchor="e",
+                font=font(11, mono=True, weight="bold"),
+                text_color=COLORS["offline"] if offline else COLORS["text_muted"],
+            ).grid(row=0, column=2)
+        if len(ranked) > MAX_ROWS:
+            self._empty(body, f"+ {len(ranked) - MAX_ROWS} more categories…", row=MAX_ROWS)
 
     def _w_room_uptime(self, body) -> None:
         rooms = [r for r in self.app.site.rooms if r.devices]
