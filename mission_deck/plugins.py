@@ -103,16 +103,16 @@ def spec_note(master, text: str) -> ctk.CTkFrame:
     """A dashed accent banner used to annotate a view for the developer spec."""
 
     frame = ctk.CTkFrame(
-        master, corner_radius=CORNER, fg_color=COLORS["accent_soft"],
-        border_width=1, border_color=COLORS["accent_line"],
+        master, corner_radius=CORNER, fg_color=COLORS["accent2_soft"],
+        border_width=1, border_color=COLORS["accent2_line"],
     )
     frame.grid_columnconfigure(1, weight=1)
     ctk.CTkLabel(
-        frame, text="", image=icon("bolt", 15, COLORS["accent_text"]),
+        frame, text="", image=icon("bolt", 15, COLORS["accent2_text"]),
     ).grid(row=0, column=0, padx=(12, 6), pady=10, sticky="n")
     ctk.CTkLabel(
         frame, text=text, anchor="w", justify="left", wraplength=1100,
-        font=font(12), text_color=COLORS["accent_text"],
+        font=font(12), text_color=COLORS["accent2_text"],
     ).grid(row=0, column=1, sticky="ew", padx=(0, 12), pady=10)
     return frame
 
@@ -195,7 +195,7 @@ class PluginCard(ctk.CTkFrame):
         elif spec.badge == "Coming soon":
             text, fg, tc = "Coming soon", COLORS["card_2"], COLORS["text_faint"]
         else:
-            text, fg, tc = "Available", COLORS["accent_soft"], COLORS["accent_text"]
+            text, fg, tc = "Available", COLORS["accent2_soft"], COLORS["accent2_text"]
         return ctk.CTkLabel(
             master, text=f" {text} ", corner_radius=8, height=18,
             font=font(10, weight="bold"), fg_color=fg, text_color=tc,
@@ -248,13 +248,13 @@ class PluginsView(ctk.CTkScrollableFrame):
         )
         hero.grid_columnconfigure(1, weight=1)
         tile = ctk.CTkFrame(
-            hero, width=52, height=52, corner_radius=14, fg_color=COLORS["accent_soft"],
-            border_width=1, border_color=COLORS["accent_line"],
+            hero, width=52, height=52, corner_radius=14, fg_color=COLORS["accent2_soft"],
+            border_width=1, border_color=COLORS["accent2_line"],
         )
         tile.grid(row=0, column=0, rowspan=2, padx=(PAD, GAP), pady=PAD, sticky="n")
         tile.grid_propagate(False)
         ctk.CTkLabel(
-            tile, text="", image=icon("plugins", 26, COLORS["accent_text"]),
+            tile, text="", image=icon("plugins", 26, COLORS["accent2_text"]),
         ).place(relx=0.5, rely=0.5, anchor="center")
         ctk.CTkLabel(
             hero, text="Extend mission-deck", anchor="w",

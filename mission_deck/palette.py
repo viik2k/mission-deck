@@ -77,7 +77,8 @@ class _Row(ctk.CTkFrame):
             self.pack(fill="x", padx=6, pady=1)
 
     def set_selected(self, selected: bool) -> None:
-        self.configure(fg_color=COLORS["card_hover"] if selected else "transparent")
+        self.configure(fg_color=COLORS["border_strong"] if selected else "transparent")
+        self._label.configure(text_color="#FFFFFF" if selected else COLORS["text"])
 
     def hide(self) -> None:
         if self.winfo_manager():
@@ -129,9 +130,9 @@ class CommandPalette(ctk.CTkToplevel):
             font=font(9, mono=True), text_color=COLORS["text_faint"],
         ).pack(pady=(4, 8))
 
-        self._entry.bind("<Down>", self._move(1))
-        self._entry.bind("<Up>", self._move(-1))
-        self._entry.bind("<Return>", lambda _e: self._run_selected())
+        self.bind("<Down>", self._move(1))
+        self.bind("<Up>", self._move(-1))
+        self.bind("<Return>", lambda _e: self._run_selected())
         self.bind("<Escape>", lambda _e: self.close())
         # With the grab held, a click outside the palette is delivered to us
         # with out-of-bounds coordinates — treat it as a dismiss.

@@ -72,9 +72,10 @@ BTN_GHOST: dict = style(BTN_OUTLINE, border_color=COLORS["border"], text_color=C
 # Destructive: red is an interrupt, never a default.
 BTN_DANGER: dict = style(BTN_OUTLINE, border_color=COLORS["offline"], text_color=COLORS["offline"])
 
-# Switches: kill the CTk default blue; accent track when on, white knob.
+# Switches: an "on" toggle is an active state, so the track reads azure
+# (orientation), not red — red stays reserved for alerts/destructive.
 SWITCH: dict = {
-    "progress_color": COLORS["accent"],
+    "progress_color": COLORS["accent2"],
     "button_color": "#ffffff",
     "button_hover_color": "#dddddd",
     "fg_color": COLORS["border_2"],

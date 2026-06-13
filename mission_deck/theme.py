@@ -1,8 +1,18 @@
-"""Nothing-inspired design tokens for mission-deck.
+"""Design tokens for mission-deck.
 
-Dark mode: OLED black canvas, white data glowing like an instrument panel.
-Monochrome hierarchy via gray scale; accent red (#D71921) is an interrupt —
-it appears only when a device is offline or an action is destructive.
+Dark mode: a near-black canvas with data glowing like an instrument panel.
+Surfaces are a **cool-charcoal elevation ladder** — each plane (canvas → nav →
+sidebar → panel → card → inset) is a distinct, faintly blue-tinted step, so the
+UI reads as layered depth rather than one flat grey.
+
+Two accents, two jobs:
+  * **Red** (#D71921) is an *interrupt* — alerts, offline devices, destructive
+    actions. It means "something is wrong / be careful".
+  * **Azure** (#4E8FEA) is *orientation* — the active view, the selected room,
+    focus rings, informational signals. It means "you are here / interactive".
+
+Keeping the two roles separate is what stops red from being diluted: when red
+appears it still means trouble, because everyday interactive emphasis is azure.
 
 Fonts (design intent — install from Google Fonts for the real thing):
   Space Grotesk  →  UI / body (system fallback: Segoe UI via CTk default)
@@ -15,50 +25,64 @@ from __future__ import annotations
 from mission_deck.models import DeviceStatus, RecordingStatus
 
 # --------------------------------------------------------------------------- #
-# Palette — Nothing dark mode
+# Palette — cool-charcoal dark mode
 #
-# Four text tiers (100 → 90 → 60 → 40%) map to the gray scale.
-# Red is not part of the hierarchy — it is an event.
+# Neutrals carry a faint blue cast (hue ~220°, very low saturation) so the dark
+# planes feel like graphite, not dead grey. Four text tiers (100 → 90 → 60 →
+# 40%) map down the ladder. Red and azure are accents, not part of the ramp.
 # --------------------------------------------------------------------------- #
 COLORS: dict[str, str] = {
-    # Surfaces
-    "bg":            "#000000",  # OLED black
-    "rail":          "#111111",  # top navigation bar
-    "panel":         "#111111",  # main content panel
-    "header":        "#111111",  # top bar (alias of panel)
-    "sidebar":       "#111111",  # room-list sidebar
-    "card":          "#1A1A1A",  # card surface (--surface-raised)
-    "card_2":        "#222222",  # secondary / inset fill
-    "card_hover":    "#222222",  # hover fill
-    "elev":          "#222222",  # elevated surfaces (menus, overlays)
-    "pill":          "#1A1A1A",  # chip / tag background
+    # Surfaces — a genuine elevation ladder (canvas darkest → inset lightest)
+    "bg":            "#000000",  # OLED black canvas
+    "rail":          "#0C0E13",  # top navigation bar (raised band)
+    "panel":         "#0F1218",  # main content panel
+    "header":        "#0C0E13",  # top bar (alias of rail)
+    "sidebar":       "#0A0C10",  # room-list sidebar (recessed)
+    "card":          "#171B22",  # card surface (--surface-raised)
+    "card_2":        "#1F242E",  # secondary / inset fill
+    "card_hover":    "#232A35",  # hover fill (a step above card_2)
+    "elev":          "#1F242E",  # elevated surfaces (menus, overlays)
+    "pill":          "#171B22",  # chip / tag background
 
     # Borders (decorative → intentional)
-    "border":        "#222222",  # hairline, decorative
-    "border_2":      "#333333",  # intentional / interactive
-    "border_strong": "#333333",  # hover / focus ring
+    "border":        "#222831",  # hairline, decorative
+    "border_2":      "#2D3440",  # intentional / interactive
+    "border_strong": "#3A4250",  # hover / focus ring
 
-    # Text hierarchy (100% → 60% → 40%)
-    "text":          "#E8E8E8",  # primary body text          (~90%)
-    "text_muted":    "#999999",  # labels, captions           (~60%)
-    "text_faint":    "#666666",  # metadata, hints            (~40%)
-    "ghost":         "#333333",  # decorative glyphs
+    # Text hierarchy (100% → 60% → 40%) — a hair cool to match the surfaces
+    "text":          "#E8EAEF",  # primary body text          (~90%)
+    "text_muted":    "#9AA1AD",  # labels, captions           (~60%)
+    "text_faint":    "#646B78",  # metadata, hints            (~40%)
+    "ghost":         "#2D3440",  # decorative glyphs
 
-    # Accent — signal red. One use per screen: errors / offline / destructive.
+    # Accent — signal red. Errors / offline / destructive only.
     "accent":        "#D71921",
     "accent_hover":  "#B5161B",
     "accent_press":  "#8E1015",
-    "accent_soft":   "#1A0000",  # very dark tint for selected items
-    "accent_line":   "#3D0709",  # accent-tinted border
-    "accent_text":   "#E05257",  # accent text on dark bg
+    "accent_soft":   "#1E0A0C",  # very dark red tint for alert backgrounds
+    "accent_line":   "#43090C",  # accent-tinted border
+    "accent_text":   "#E8595E",  # accent text on dark bg
+
+    # Accent 2 — orientation azure. Active view / selection / focus / info.
+    "accent2":       "#4E8FEA",
+    "accent2_hover": "#6AA2EE",
+    "accent2_soft":  "#0E1A2A",  # dark azure tint for active / selected fills
+    "accent2_line":  "#284665",  # azure-tinted border
+    "accent2_text":  "#8FBEF4",  # azure text on dark bg
 
     # Status semantics — data encoding only (value, not label or row bg)
-    "online":        "#4A9E5C",  # connected / success
+    "online":        "#4DA75E",  # connected / success
     "offline":       "#D71921",  # unreachable / error (shares accent)
-    "warn":          "#D4A843",  # degraded / checking
-    "info":          "#999999",  # informational — uses secondary text color
+    "warn":          "#D9A441",  # degraded / checking
+    "info":          "#4E8FEA",  # informational (shares orientation azure)
     "rec":           "#D71921",  # "on air" recording (shares accent)
-    "unknown":       "#666666",  # never checked
+    "unknown":       "#646B78",  # never checked
+
+    # Soft status fills — faint washes so a state can colour a whole row/card,
+    # not just a dot. Tuned to sit one step above their plane on the ladder.
+    "online_soft":   "#0D1A12",  # faint green wash
+    "offline_soft":  "#1E0C0E",  # faint red wash (offline cards)
+    "warn_soft":     "#1C1707",  # faint amber wash
 }
 
 # Status indicator colours keyed by DeviceStatus.

@@ -22,7 +22,7 @@ from mission_deck.ui import font
 
 # Visual vocabulary per kind: the accent strip + glyph colour.
 _KIND_COLORS = {
-    "info":    COLORS["text_muted"],
+    "info":    COLORS["info"],
     "success": COLORS["online"],
     "error":   COLORS["offline"],
     "warn":    COLORS["warn"],

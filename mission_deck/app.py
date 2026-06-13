@@ -177,8 +177,10 @@ class RoomButton(ctk.CTkButton):
 
     def _on_leave(self, event=None):
         super()._on_leave(event)
+        # Keep the dot's canvas bg in sync with the (selected) pill fill so no
+        # square shows through; transparent when the row is unselected.
         self._health_dot.configure(
-            fg_color=COLORS["accent_soft"] if self._selected else "transparent"
+            fg_color=COLORS["accent2_soft"] if self._selected else "transparent"
         )
 
     def refresh_health(self) -> None:
@@ -187,12 +189,13 @@ class RoomButton(ctk.CTkButton):
     def set_selected(self, selected: bool) -> None:
         self._selected = selected
         if selected:
+            # Azure-tinted pill marks the room you're in (orientation).
             self.configure(
-                fg_color="transparent",
+                fg_color=COLORS["accent2_soft"],
                 text_color=COLORS["text"],
                 font=font(11, mono=True, weight="bold"),
             )
-            self._health_dot.configure(fg_color="transparent")
+            self._health_dot.configure(fg_color=COLORS["accent2_soft"])
         else:
             self.configure(
                 fg_color="transparent",
@@ -352,10 +355,12 @@ class DeviceCard(ctk.CTkFrame):
             self._lat.configure(text="— timeout")
         else:
             self._lat.configure(text="—")
-        # Offline devices get a red outline so they stand out in the grid.
+        # Offline devices get a faint red wash + red outline so they stand out
+        # in the grid; everything else sits on the neutral card surface.
+        offline = status is DeviceStatus.OFFLINE
         self.configure(
-            border_color=COLORS["offline"] if status is DeviceStatus.OFFLINE
-            else COLORS["border"]
+            fg_color=COLORS["offline_soft"] if offline else COLORS["card"],
+            border_color=COLORS["offline"] if offline else COLORS["border"],
         )
         # Recorders get a live recording-state pill; other devices hide it.
         if isinstance(self.device, Recorder):
@@ -369,12 +374,18 @@ class DeviceCard(ctk.CTkFrame):
             self._recording.grid_remove()
 
     def _on_enter(self, _event=None) -> None:
-        self.configure(fg_color=COLORS["card_hover"], border_color=COLORS["border_strong"])
+        offline = self.device is not None and self.device.status is DeviceStatus.OFFLINE
+        # Keep the red wash + outline on hover for offline cards; neutral cards
+        # lift to the hover surface.
+        self.configure(
+            fg_color=COLORS["offline_soft"] if offline else COLORS["card_hover"],
+            border_color=COLORS["offline"] if offline else COLORS["border_strong"],
+        )
 
     def _on_leave(self, _event=None) -> None:
         offline = self.device is not None and self.device.status is DeviceStatus.OFFLINE
         self.configure(
-            fg_color=COLORS["card"],
+            fg_color=COLORS["offline_soft"] if offline else COLORS["card"],
             border_color=COLORS["offline"] if offline else COLORS["border"],
         )
 
@@ -1083,8 +1094,9 @@ class NavTab(ctk.CTkFrame):
         self._btn.configure(
             text_color=color, image=icon(self.icon_name, 14, color),
         )
+        # Azure underline marks "you are here" (orientation), leaving red for alerts.
         self._underline.configure(
-            fg_color=COLORS["accent"] if active else "transparent",
+            fg_color=COLORS["accent2"] if active else "transparent",
         )
 
 
@@ -1932,9 +1944,10 @@ class App(ctk.CTk):
     def _paint_filter_chips(self) -> None:
         for key, chip in self._filter_chips.items():
             if key == self._room_filter:
+                # Active scope reads as orientation azure, not a stark white block.
                 chip.configure(
-                    fg_color=COLORS["text"], text_color=COLORS["bg"],
-                    border_color=COLORS["text"],
+                    fg_color=COLORS["accent2_soft"], text_color=COLORS["accent2_text"],
+                    border_color=COLORS["accent2_line"],
                 )
             else:
                 chip.configure(
