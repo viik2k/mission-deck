@@ -45,13 +45,22 @@ Each module has a single, well-defined job. Please keep these boundaries:
 |--------|----------------|----------|
 | `config.py` | Find, load, **structurally** validate the JSON | Device internals, GUI |
 | `models.py` | Typed `Site` / `Room` / `Device` + device registry | File I/O, GUI, networking, logging |
-| `network.py` | Async status probes (monitor registry) + HTTP/TCP control transports | GUI; must be thread-safe |
+| `network.py` | Async status probes (monitor registry: `tcp`/`http`/`https`/`ping`/`tls`) + HTTP/TCP control transports | GUI; must be thread-safe |
 | `controls.py` | Build per-device control action lists from config `commands` | Doing the I/O itself (delegates to `network.py`) |
 | `browser.py` | Open web UIs in the configured browser | GUI, models |
 | `history.py` | Persisted uptime-history store (SQLite, best-effort) | Anything beyond stdlib `sqlite3`; raising into callers |
 | `dashboard.py` | Estate-wide Overview view (presentation only) | Networking; touching the network/worker threads |
+| `dashboards.py` | Composable, user-ordered dashboard boards (presentation only) | Networking; same constraints as `dashboard.py` |
+| `report.py` | Estate status report export (CSV) | GUI, networking |
 | `state.py` | Persisted per-user preferences + recent files | Breaking the app if the file is corrupt |
 | `theme.py` | Colours + sizing tokens | Logic, logging |
+| `palette.py` | Command palette (Ctrl+K): fuzzy jump to rooms/devices/actions | I/O |
+| `toast.py` | Non-blocking toast notifications | I/O |
+| `ui.py` | Cached fonts, button/switch tokens, `PromptDialog` | Logic beyond presentation |
+| `icons.py` | Vector icon factory (`CTkImage`) | Anything beyond presentation |
+| `plugins.py` | Plugins screen + plugin catalogue (`PluginSpec`) | Holding activation state (lives in `AppState`) |
+| `cloud.py` | Cloud Sync view (HTTPS config source, plugin-gated) | Doing the download itself (delegates to `config.fetch_remote_config`) |
+| `activity.py` | Activity Log view (browsable audit trail, plugin-gated) | Networking; writing |
 | `logging_setup.py` | Diagnostic + audit logging; excepthooks | Anything beyond stdlib; raising into callers |
 | `editors.py` | In-app room/device/command editor dialogs | Bypassing `models`/`config` validation |
 | `app.py` | CustomTkinter UI and event orchestration | Business rules that belong in models |

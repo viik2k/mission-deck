@@ -76,16 +76,49 @@ DB path with `MISSION_DECK_HISTORY_DB`.
 ### Monitor / Monitor registry
 A *monitor* decides how a device's reachability is judged — an
 `async (Device, float) -> CheckResult`. `network.py` holds a registry
-(`@register_monitor`, mirroring `@register_device`): `tcp` (default, TCP connect)
-and `http`/`https` (any answered endpoint = up). A device opts in with a
+(`@register_monitor`, mirroring `@register_device`): `tcp` (default, TCP connect),
+`http`/`https` (any answered endpoint = up), `ping`/`icmp` (one ICMP echo) and
+`tls`/`ssl` (a completed TLS handshake on the HTTPS port). A device opts in with a
 `"monitor"` config key. Adding a check type is one decorator.
 
 ### Overview / Dashboard
-The estate-wide homepage (`dashboard.py`, `DashboardView`): KPI tiles, a
-needs-attention list, an estate recorders panel, per-room 24h uptime, and a
-recent-activity feed. Pure presentation — it reads live `Site` state + the
-`HistoryStore` and never touches the network itself. Reached via the sidebar
-"⌂ Overview" button.
+The estate-wide homepage (`dashboard.py`, `DashboardView`): a flat, single-column
+report — a stat strip, a needs-attention list, an estate recorders panel,
+per-room 24h uptime, and a recent-activity feed. Pure presentation — it reads
+live `Site` state + the `HistoryStore` and never touches the network itself.
+Reached via the "Overview" tab in the top nav bar.
+
+### Dashboards (composable)
+The user-composed counterpart to the Overview (`dashboards.py`): a board of
+widgets (KPI tiles, 24h uptime/latency trend bars, offline/recorder/room-uptime/
+activity lists) added from a catalogue, reordered/removed in place, and persisted
+per-operator in `AppState.dashboard_widgets`.
+
+### Plugins
+The Plugins screen (`plugins.py`, `PluginSpec`/`PLUGINS`): a catalogue of the
+built-in monitors (always on) plus optional, toggleable plugins. Enabling a
+plugin that contributes a view (Cloud Sync, Activity Log) adds its nav tab;
+activation state lives in `AppState.enabled_plugins`.
+
+### Cloud Sync
+A plugin-gated view (`cloud.py`) that pulls `config.json` from a central HTTPS
+URL via `config.fetch_remote_config` — validated, cached locally, audited
+(`cloud.sync`), and loaded via a soft restart.
+
+### Activity Log
+A plugin-gated view (`activity.py`) that reads the local `audit.log` via
+`logging_setup.tail_audit` and presents a full-screen, filterable browser of
+operator actions. Read-only; nothing leaves the workstation.
+
+### Command palette
+The Ctrl+K (or Ctrl+P) global launcher (`palette.py`): fuzzy-jump to any room,
+device, or global action. Items are built from the live `Site` each time it
+opens; every action is a callback into `App`.
+
+### Toast notification
+A non-blocking, auto-dismissing message in a bottom-right stack (`toast.py`) —
+used for sweep results, newly-offline devices, report-exported and
+settings-saved confirmations.
 
 ### Open Web UIs
 The headline feature: open the management web page of every web-accessible

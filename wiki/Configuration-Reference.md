@@ -213,6 +213,8 @@ existing config behaves unchanged).
 |-----------|--------------|
 | `tcp` *(default)* | Opens a TCP connection to `host:port`. Online = the port accepts a connection. |
 | `http` / `https` | Issues an HTTP(S) request; **any answered endpoint** (even a 4xx/5xx) is treated as up — only a transport failure is offline. The URL is taken from `health_url`, else the device's resolved `web_url`; it falls back to a `tcp` probe if neither resolves. Honours `verify_tls: false` for self-signed-cert appliances. |
+| `ping` / `icmp` | Sends one ICMP echo via the system `ping` binary — for devices with no open TCP port. On Windows a reply only counts as up when it carries a TTL. |
+| `tls` / `ssl` | Completes a TLS handshake on the HTTPS port — a stronger "alive and speaking TLS" signal than an open socket for web-managed gear. The port is taken from `tls_port`, else the device's `port`, else `443`. Certificates are **not** verified by default; set `verify_tls: true` to make an untrusted/expired/wrong-host certificate count as offline. |
 
 ```jsonc
 {
