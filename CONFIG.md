@@ -106,13 +106,16 @@ Each object in a room's `devices` array represents one piece of AV equipment.
 | `tags` | array of strings | `[]` | Arbitrary tags for grouping/filtering (e.g. `["camera","video"]`) |
 | `web_url` | string | — | Explicit web-UI URL; overrides all web derivation below |
 | `web_protocol` / `web_port` / `web_path` | — | — | Build a web-UI URL separately from the control port (e.g. control on TCP/41794 but admin page on HTTP/80) |
-| `monitor` | string | `"tcp"` | How reachability is judged: `tcp` (TCP connect), `http`/`https` (any answered endpoint = up), or `ping` (one ICMP echo via the system ping — for devices with no open TCP port) |
+| `monitor` | string | `"tcp"` | How reachability is judged: `tcp` (TCP connect), `http`/`https` (any answered endpoint = up), `ping` (one ICMP echo via the system ping — for devices with no open TCP port), or `tls` (completes a TLS handshake on the HTTPS port) |
 | `health_url` | string | — | URL the `http`/`https` monitor probes (falls back to the device's `web_url`) |
+| `tls_port` | integer | — | Port the `tls` monitor handshakes on (falls back to the device's `port`, else `443`) |
+| `verify_tls` | boolean | `false` | When `true`, the `tls` monitor rejects an untrusted/expired/wrong-host certificate (also honoured by `http`/`https` commands) |
 | `commands` | array | — | Config-driven control buttons — see [Control Commands](#control-commands) |
 
 > **Control port vs. web UI:** the status check uses the device's *monitor*
 > (the `tcp` monitor probes `protocol`/`port`; the `http`/`https` monitor probes
-> `health_url`/`web_url`; the `ping` monitor needs only `host`), while
+> `health_url`/`web_url`; the `ping` monitor needs only `host`; the `tls` monitor
+> handshakes on `tls_port`/`port`/443), while
 > **Open Web UIs** uses the resolved web URL.
 > Devices with no web scheme (SSH/raw-TCP only) are skipped when opening web UIs.
 

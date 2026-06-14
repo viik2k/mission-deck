@@ -28,8 +28,10 @@ mission-deck serves three audiences, and this wiki is organised around them:
 
 ### For operators
 - **[User Guide](User-Guide.md)** — launching the app, the welcome screen, the
-  estate **Overview**, navigating cities/rooms/devices, checking status, opening
-  web UIs, issuing device commands, recording controls, and the Settings dialog.
+  top-nav shell, the estate **Overview**, composable **Dashboards**, the
+  **Plugins** screen (Cloud Sync + Activity Log), navigating cities/rooms/devices,
+  checking status, opening web UIs, issuing device commands, recording controls,
+  and the Settings dialog.
 
 ### For administrators
 - **[Installation & Setup](Installation-and-Setup.md)** — running from source,

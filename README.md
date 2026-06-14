@@ -51,10 +51,17 @@ click** (the headline feature of the original tool).
   catalogue: KPI tiles, 24-hour **uptime and latency trend charts** (drawn
   from the history database), offline / recorder / room-uptime lists. Layouts
   persist per-user, refresh live with every sweep, and reset in one click.
+- **Plugins** — a Plugins screen lists the built-in monitors (TCP, HTTP/HTTPS,
+  Ping, TLS) and the optional, toggleable plugins. Enabling one that contributes
+  a view (Cloud Sync, Activity Log) adds its tab to the nav bar; the choice
+  persists per operator.
 - **Cloud Sync** — point every workstation at one HTTPS URL (OneDrive /
   SharePoint direct link, intranet server, Git raw) and sync the estate
   config centrally. Downloads are schema-validated, cached locally for
   offline-safe startup, and audited.
+- **Activity Log** — an optional plugin view: a full-screen, filterable reader
+  of the local audit trail (who ran which command, on which device, when, and
+  whether it succeeded). Reads `audit.log` only — nothing leaves the workstation.
 - **Estate Overview** — a second top-level view (the "Overview" tab) that
   answers "how is the whole estate right now?" as a flat, single-column report:
   a headline stat strip (rooms, devices, online, offline, healthy rooms), a
@@ -75,8 +82,10 @@ click** (the headline feature of the original tool).
   opens thousands of sockets at once.
 - **Pluggable monitors** — how a device's reachability is judged is itself a
   registry: the default `tcp` monitor opens a TCP connection, `http`/`https`
-  monitors treat any answered endpoint as up, and the `ping` monitor sends one
-  ICMP echo via the system ping (for devices with no open TCP port). A device
+  monitors treat any answered endpoint as up, the `ping` monitor sends one
+  ICMP echo via the system ping (for devices with no open TCP port), and the
+  `tls` monitor completes a TLS handshake on the HTTPS port (a stronger liveness
+  signal for web-managed gear, with optional certificate verification). A device
   opts in with a `"monitor"` config key; new check types are one decorator away.
 - **Auto-refresh** — an optional toggle re-runs the status check for the current
   room on an interval, so the dashboard stays live hands-free.
@@ -202,8 +211,9 @@ mission-deck looks for a config in this order (first match wins):
 | `tags` | no | List of strings |
 | `web_url` | no | Explicit web UI URL (overrides everything below) |
 | `web_protocol` / `web_port` / `web_path` | no | Build a web UI URL separately from the control port |
-| `monitor` | no | How reachability is judged: `tcp` (default), `http`, `https`, or `ping` |
+| `monitor` | no | How reachability is judged: `tcp` (default), `http`, `https`, `ping`, or `tls` |
 | `health_url` | no | URL the `http`/`https` monitor probes (else the device's `web_url`) |
+| `tls_port` | no | Port the `tls` monitor handshakes on (else `port`, else 443); `verify_tls: true` requires a valid cert |
 | `commands` | no | List of control actions (buttons) for the device — see below |
 
 **Control port vs web UI:** a device's *status check* uses its monitor
@@ -333,9 +343,17 @@ mission-deck/
     ├── browser.py           # open web UIs in the configured browser
     ├── history.py           # persisted uptime-history store (SQLite)
     ├── dashboard.py         # estate-wide Overview view (flat report: stats, uptime, activity)
+    ├── dashboards.py        # composable, user-ordered dashboard boards
     ├── report.py            # estate status report export (CSV)
     ├── state.py             # remembered config + GUI-managed preferences
     ├── theme.py             # dark palette + sizing tokens
+    ├── palette.py           # global command palette (Ctrl+K)
+    ├── toast.py             # non-blocking toast notifications
+    ├── ui.py                # cached fonts, button/switch tokens, PromptDialog
+    ├── icons.py             # vector icon factory (CTkImage)
+    ├── plugins.py           # Plugins screen + plugin catalogue
+    ├── cloud.py             # Cloud Sync view (HTTPS config source, plugin-gated)
+    ├── activity.py          # Activity Log view (audit trail, plugin-gated)
     ├── logging_setup.py     # diagnostic + audit logging configuration
     ├── editors.py           # in-app room/device/command editor dialogs
     └── app.py               # CustomTkinter UI + event orchestration

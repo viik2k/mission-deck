@@ -81,7 +81,7 @@ operator actions. One JSON object per line. Every record carries:
 …plus event-specific fields. Example lines:
 
 ```json
-{"ts":"2026-06-02T09:15:04.321+00:00","event":"app.start","user":"avtech","version":"0.1.0","log_dir":"…/logs"}
+{"ts":"2026-06-02T09:15:04.321+00:00","event":"app.start","user":"avtech","version":"0.2.0","log_dir":"…/logs"}
 {"ts":"2026-06-02T09:15:04.402+00:00","event":"config.load","user":"avtech","path":"…/config.json","demo":false,"rooms":4,"ok":true}
 {"ts":"2026-06-02T09:16:20.118+00:00","event":"status_check.complete","user":"avtech","room_id":"courtroom-1a","room_name":"Courtroom 1A","devices":6,"online":4,"offline":2}
 {"ts":"2026-06-02T09:17:55.640+00:00","event":"room.open_web_uis","user":"avtech","room_id":"courtroom-1a","room_name":"Courtroom 1A","count":4,"browser":"chrome"}
@@ -97,11 +97,14 @@ operator actions. One JSON object per line. Every record carries:
 | `config.load` | A config is loaded (success or failure) | `path`, `demo`, `rooms`, `ok`, `error` |
 | `config.save` | A config is written from the editors | `path`, `ok`, `rooms`, `error` |
 | `config.switch` | Operator switches config | `frm`, `to` |
-| `settings.change` | Settings dialog saved | `ping_timeout_seconds`, `auto_refresh_seconds`, `browser_path`, `browser_new_window`, `start_on_dashboard`, `dashboard_poll_enabled`, `dashboard_poll_seconds` |
+| `cloud.sync` | A remote config is pulled from the Cloud Sync view | `url`, `ok`, `error` |
+| `settings.change` | Settings dialog saved | `ping_timeout_seconds`, `auto_refresh_seconds`, `browser_path`, `browser_new_window`, `start_on_dashboard`, `dashboard_poll_enabled`, `dashboard_poll_seconds`, `max_concurrent_checks` |
+| `settings.change` | A plugin is enabled/disabled on the Plugins screen | `plugin`, `enabled` |
 | `device.command` | A control command is issued | `device_id`, `device_name`, `device_type`, `host`, `control`, (outcome) |
 | `room.open_web_uis` | Open Web UIs invoked | `room_id`, `room_name`, `count`, `browser` |
 | `status_check.complete` | A room status check finishes | `room_id`, `room_name`, `devices`, `online`, `offline` |
 | `status_check.estate` | An estate-wide sweep finishes | `devices`, `online`, `offline` |
+| `report.export` | A CSV status report is exported | `path` |
 
 ### Emitting audit events (developers)
 

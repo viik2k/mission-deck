@@ -50,6 +50,7 @@ Each module has one job and strict constraints:
 | `icons.py` | Vector icon factory (CTkImage) | Presentation only |
 | `plugins.py` | Plugins screen + plugin catalogue (`PluginSpec`) | Presentation + static catalogue; activation state lives in `AppState` |
 | `cloud.py` | Cloud Sync view (HTTPS config source, plugin-gated) | Presentation + callbacks; download/validate/cache lives in `config.fetch_remote_config`, run off-thread via `app.run_background`; loads via soft-restart |
+| `activity.py` | Activity Log view (browsable audit trail, plugin-gated) | Presentation only; reads `logging_setup.tail_audit` (read-only); no networking; UI thread |
 | `editors.py` | Room / device / command editor dialogs | Presentation; writes back through `App` save paths |
 | `app.py` | CustomTkinter UI + event orchestration | Marshals network results to UI thread |
 
@@ -96,9 +97,12 @@ How a device's reachability is judged is itself pluggable. `network.py` holds a
 `@register_device`. A *monitor* is `async (Device, float) -> CheckResult`.
 Built-ins: `tcp` (open a TCP connection — the historical default for every
 config), `http`/`https` (any *answered* endpoint counts as up; URL comes from
-a `health_url` config key, else the device's `web_url`) and `ping`/`icmp` (one
+a `health_url` config key, else the device's `web_url`), `ping`/`icmp` (one
 ICMP echo via the system ping binary — for devices with no open TCP port;
-on Windows a reply only counts when it carries a TTL). `check_device()` is just
+on Windows a reply only counts when it carries a TTL) and `tls`/`ssl` (complete
+a TLS handshake on the HTTPS port — a stronger liveness signal than an open
+socket for web-managed gear; port from `tls_port`, else `port`, else 443; certs
+not verified unless `verify_tls: true`). `check_device()` is just
 a dispatcher: a device opts into a monitor with a `"monitor"` config key,
 otherwise it falls back to `DEFAULT_MONITOR` (`tcp`). Add a new check type with a
 single decorator — no caller changes.
@@ -166,7 +170,7 @@ If no config is found, a `WelcomeWindow` is shown. Switching config in Settings 
 
 Device `commands` entries in JSON (HTTP or raw TCP) require no code changes. Placeholders `{host}`, `{port}`, `{value}` are substituted at runtime (in both the URL and the body). An optional `prompt` key causes the UI to ask the user for `{value}` before sending. HTTP commands may set `method` (e.g. `POST`), a `body`, `headers`, `auth` (`{"username","password"}` → Basic auth) and `verify_tls: false` — enough to drive VC codec APIs (Cisco xCommand, Poly REST) over self-signed-cert HTTPS. Codec credentials live in the git-ignored `config.json`, never in `config.example.json`.
 
-A device may also pick how it is health-checked with a `"monitor"` key (`tcp` default, or `http`/`https`); the `http` monitor probes an optional `health_url` (else the device's web UI). See the monitor registry above.
+A device may also pick how it is health-checked with a `"monitor"` key (`tcp` default, or `http`/`https`, `ping`/`icmp`, `tls`/`ssl`); the `http` monitor probes an optional `health_url` (else the device's web UI), and the `tls` monitor an optional `tls_port`. See the monitor registry above.
 
 ### Widget pooling
 
@@ -192,7 +196,7 @@ rotating streams to `<user_config_dir>/logs/` (override the directory with
 - **`audit.log`** — one JSON object per line recording operator actions
   (`device.command`, `room.open_web_uis`, `status_check.complete`,
   `status_check.estate`, `config.load`, `config.save`, `config.switch`,
-  `settings.change`, `report.export`, `app.start`/`app.stop`). Emit
+  `cloud.sync`, `settings.change`, `report.export`, `app.start`/`app.stop`). Emit
   events with `logging_setup.audit(event, **fields)`; each line carries `ts`, `event`
   and `user`. The audit logger never propagates to the diagnostic handlers.
 

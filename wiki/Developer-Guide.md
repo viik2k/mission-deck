@@ -81,12 +81,13 @@ the [Configuration Reference](Configuration-Reference.md#control-port-vs-web-ui-
 ## 3a. Adding a new monitor (status-check type)
 
 How a device's reachability is judged is a registry in `network.py`, mirroring
-the device registry. A new check type is **one decorator** — an
+the device registry. The built-ins today are `tcp` (default), `http`/`https`,
+`ping`/`icmp` and `tls`/`ssl`. A new check type is **one decorator** — an
 `async (Device, float) -> CheckResult`:
 
 ```python
-@register_monitor("ping")          # the config "monitor" value(s) that map here
-async def ping_monitor(device: Device, timeout: float) -> CheckResult:
+@register_monitor("snmp")          # the config "monitor" value(s) that map here
+async def snmp_monitor(device: Device, timeout: float) -> CheckResult:
     ...
     return CheckResult(device.id, DeviceStatus.ONLINE, latency_ms, None)
 ```

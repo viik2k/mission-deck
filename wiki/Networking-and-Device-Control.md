@@ -43,6 +43,8 @@ decorator that mirrors `@register_device` in `models.py`. A *monitor* is an
 |---------|-----------|
 | `tcp` *(default)* | Open a TCP connection to `host:port` — the historical default for every config. |
 | `http` / `https` | Issue an HTTP(S) request; **any answered endpoint** (even a 4xx/5xx) counts as up. The URL comes from a `health_url` config key, else the device's `web_url`. Honours `verify_tls: false`. Falls back to `tcp` if no URL resolves. |
+| `ping` / `icmp` | One ICMP echo via the system `ping` binary — for devices with no open TCP port. On Windows a reply only counts when it carries a TTL (so a "destination unreachable" isn't mistaken for a host). |
+| `tls` / `ssl` | Complete a TLS handshake on the HTTPS port — a stronger "it's really alive and speaking TLS" signal than an open socket for web-managed gear. Port resolution: a `tls_port` config key, else the device's `port`, else `443`. Certificates are **not** verified by default (LAN gear routinely uses self-signed certs); set `verify_tls: true` to make an untrusted/expired/wrong-host cert count as OFFLINE. |
 
 `check_device()` is just a dispatcher: a device opts into a monitor with a
 `"monitor"` config key (`monitor_name_for`), otherwise it falls back to
