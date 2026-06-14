@@ -213,31 +213,51 @@ def audit_log_path() -> Path | None:
     return (_log_dir / AUDIT_FILENAME) if _log_dir is not None else None
 
 
+# Bytes read per backward step when tailing the audit log (see ``tail_audit``).
+_TAIL_BLOCK = 64 * 1024
+
+
 def tail_audit(limit: int = 20) -> list[dict[str, Any]]:
     """Return up to ``limit`` most-recent audit events, newest first.
 
-    Reads the JSON-lines audit log for the dashboard's activity feed. Best-effort
-    and read-only: a missing file, an I/O error, or a malformed line is simply
-    skipped — this must never raise into the UI.
+    Reads only the *tail* of the JSON-lines audit log: it seeks to the end and
+    walks backwards a block at a time until it has enough lines, so a rotated
+    multi-MB log is never pulled into memory in full (only the last few KB).
+    Best-effort and read-only: a missing file, an I/O error, or a malformed line
+    is simply skipped — this must never raise into the UI.
     """
 
+    if limit <= 0:
+        return []
     path = audit_log_path()
     if path is None:
         return []
     try:
-        with path.open("r", encoding="utf-8", errors="replace") as handle:
-            lines = handle.readlines()
+        with path.open("rb") as handle:
+            handle.seek(0, os.SEEK_END)
+            pos = handle.tell()
+            data = b""
+            newlines = 0
+            # Stop once we've seen one more newline than requested (so the first
+            # kept line is whole, not a fragment) or reached the start of file.
+            while pos > 0 and newlines <= limit:
+                step = min(_TAIL_BLOCK, pos)
+                pos -= step
+                handle.seek(pos)
+                chunk = handle.read(step)
+                data = chunk + data
+                newlines += chunk.count(b"\n")
     except OSError as exc:
         logger.debug("Could not read audit log %s: %s", path, exc)
         return []
 
     events: list[dict[str, Any]] = []
-    for line in reversed(lines):
-        line = line.strip()
-        if not line:
+    for raw in reversed(data.split(b"\n")):
+        raw = raw.strip()
+        if not raw:
             continue
         try:
-            record = json.loads(line)
+            record = json.loads(raw.decode("utf-8", "replace"))
         except ValueError:
             continue
         if isinstance(record, dict):

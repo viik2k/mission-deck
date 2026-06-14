@@ -79,6 +79,51 @@ def _searchable(event: dict) -> str:
     )).lower()
 
 
+class _Row:
+    """A pooled activity row: its widgets are built once and rebound per event.
+
+    Rebuilding a CTk widget tree is expensive, so the view keeps a pool of these
+    and reconfigures them in place (matching the ``DeviceCard``/``RoomButton``
+    pooling elsewhere) instead of destroying and recreating hundreds of widgets
+    on every refresh or keystroke.
+    """
+
+    def __init__(self, master) -> None:
+        self.frame = ctk.CTkFrame(master, corner_radius=CORNER, fg_color=COLORS["card"])
+        self.frame.grid_columnconfigure(1, weight=1)
+        # Left accent rule encodes the action family.
+        self._accent = ctk.CTkFrame(self.frame, width=3, corner_radius=2)
+        self._accent.grid(row=0, column=0, rowspan=2, sticky="ns", padx=(0, GAP), pady=8)
+        self._name = ctk.CTkLabel(
+            self.frame, anchor="w", font=font(12, mono=True, weight="bold"),
+        )
+        self._name.grid(row=0, column=1, sticky="ew", pady=(8, 0))
+        self._detail = ctk.CTkLabel(
+            self.frame, anchor="w", justify="left", wraplength=640,
+            font=font(11), text_color=COLORS["text_muted"],
+        )
+        self._detail.grid(row=1, column=1, sticky="ew", pady=(0, 8))
+        self._meta = ctk.CTkLabel(
+            self.frame, anchor="e", justify="right",
+            font=font(10, mono=True), text_color=COLORS["text_faint"],
+        )
+        self._meta.grid(row=0, column=2, rowspan=2, sticky="e", padx=(GAP, 12))
+
+    def bind(self, row: int, event: dict) -> None:
+        name = str(event.get("event", "event"))
+        accent = _event_color(name)
+        self._accent.configure(fg_color=accent)
+        self._name.configure(text=name, text_color=accent)
+        self._detail.configure(text=_detail(event) or "—")
+        meta = _fmt_ts(event.get("ts"))
+        user = str(event.get("user", "")).strip()
+        self._meta.configure(text=f"{meta}\n{user}" if user else meta)
+        self.frame.grid(row=row, column=0, sticky="ew", pady=2)
+
+    def hide(self) -> None:
+        self.frame.grid_remove()
+
+
 class ActivityView(ctk.CTkScrollableFrame):
     """Full-screen, filterable reader for the local audit trail."""
 
@@ -86,13 +131,20 @@ class ActivityView(ctk.CTkScrollableFrame):
         super().__init__(master, fg_color="transparent")
         self.app = app
         self._filter = ctk.StringVar()
+        # Events are loaded from disk only on an explicit refresh and cached here;
+        # filtering works off this list so a keystroke never re-reads the log.
+        self._events: list[dict] = []
+        self._rows: list[_Row] = []
+        self._empty_label: ctk.CTkLabel | None = None
+        self._filter_job: str | None = None
+        self._sig: tuple | None = None  # last painted (needle, events) signature
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(1, weight=1)
         self._build_header()
         self._list = ctk.CTkFrame(self, fg_color="transparent")
         self._list.grid(row=1, column=0, sticky="nsew", pady=(GAP, 0))
         self._list.grid_columnconfigure(0, weight=1)
-        self._filter.trace_add("write", lambda *_: self.refresh())
+        self._filter.trace_add("write", lambda *_: self._on_filter_changed())
         self.refresh()
 
     # ------------------------------------------------------------------ #
@@ -143,24 +195,57 @@ class ActivityView(ctk.CTkScrollableFrame):
 
     # ------------------------------------------------------------------ #
     def refresh(self) -> None:
-        for child in self._list.winfo_children():
-            child.destroy()
+        """Reload events from disk, then repaint. The REFRESH button / first show."""
 
-        events = tail_audit(_MAX_EVENTS)
+        self._events = tail_audit(_MAX_EVENTS)
+        self._apply_filter()
+
+    def _on_filter_changed(self) -> None:
+        """Debounce keystrokes: re-filter the cached events after a short pause."""
+
+        if self._filter_job is not None:
+            self.after_cancel(self._filter_job)
+        self._filter_job = self.after(200, self._apply_filter)
+
+    def _apply_filter(self) -> None:
+        """Filter the cached events and repaint — no disk read, no widget churn."""
+
+        self._filter_job = None
         needle = self._filter.get().strip().lower()
         if needle:
-            events = [e for e in events if needle in _searchable(e)]
+            events = [e for e in self._events if needle in _searchable(e)]
+        else:
+            events = self._events
 
         total = len(events)
         self._count.configure(text=f"{total} event{'s' if total != 1 else ''}")
 
-        if not events:
-            self._empty()
+        # Skip the repaint entirely when the filtered set hasn't changed (e.g. a
+        # REFRESH that found nothing new), mirroring the dashboard's signature guard.
+        signature = (needle, tuple(
+            (e.get("ts"), e.get("event"), e.get("user")) for e in events
+        ))
+        if signature == self._sig:
             return
-        for row, event in enumerate(events):
-            self._row(row, event)
+        self._sig = signature
 
-    def _empty(self) -> None:
+        if not events:
+            self._show_empty()
+            return
+        self._hide_empty()
+        for index, event in enumerate(events):
+            if index < len(self._rows):
+                row = self._rows[index]
+            else:
+                row = _Row(self._list)
+                self._rows.append(row)
+            row.bind(index, event)
+        for surplus in self._rows[len(events):]:
+            surplus.hide()
+
+    def _show_empty(self) -> None:
+        for row in self._rows:
+            row.hide()
         path = audit_log_path()
         if path is None:
             msg = "Audit logging is disabled (no writable log directory)."
@@ -168,35 +253,14 @@ class ActivityView(ctk.CTkScrollableFrame):
             msg = "No events match that filter."
         else:
             msg = "No activity recorded yet — operator actions will appear here."
-        ctk.CTkLabel(
-            self._list, text=msg, anchor="w",
-            font=font(12), text_color=COLORS["text_faint"],
-        ).grid(row=0, column=0, sticky="w", padx=4, pady=PAD)
+        if self._empty_label is None:
+            self._empty_label = ctk.CTkLabel(
+                self._list, anchor="w",
+                font=font(12), text_color=COLORS["text_faint"],
+            )
+        self._empty_label.configure(text=msg)
+        self._empty_label.grid(row=0, column=0, sticky="w", padx=4, pady=PAD)
 
-    def _row(self, row: int, event: dict) -> None:
-        name = str(event.get("event", "event"))
-        accent = _event_color(name)
-        line = ctk.CTkFrame(self._list, corner_radius=CORNER, fg_color=COLORS["card"])
-        line.grid(row=row, column=0, sticky="ew", pady=2)
-        line.grid_columnconfigure(1, weight=1)
-
-        # Left accent rule encodes the action family.
-        ctk.CTkFrame(line, width=3, corner_radius=2, fg_color=accent).grid(
-            row=0, column=0, rowspan=2, sticky="ns", padx=(0, GAP), pady=8)
-
-        ctk.CTkLabel(
-            line, text=name, anchor="w",
-            font=font(12, mono=True, weight="bold"), text_color=accent,
-        ).grid(row=0, column=1, sticky="ew", pady=(8, 0))
-        detail = _detail(event)
-        ctk.CTkLabel(
-            line, text=detail or "—", anchor="w", justify="left", wraplength=640,
-            font=font(11), text_color=COLORS["text_muted"],
-        ).grid(row=1, column=1, sticky="ew", pady=(0, 8))
-
-        meta = _fmt_ts(event.get("ts"))
-        user = str(event.get("user", "")).strip()
-        ctk.CTkLabel(
-            line, text=f"{meta}\n{user}" if user else meta, anchor="e", justify="right",
-            font=font(10, mono=True), text_color=COLORS["text_faint"],
-        ).grid(row=0, column=2, rowspan=2, sticky="e", padx=(GAP, 12))
+    def _hide_empty(self) -> None:
+        if self._empty_label is not None:
+            self._empty_label.grid_remove()
