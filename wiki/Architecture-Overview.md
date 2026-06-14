@@ -34,7 +34,7 @@ Three principles run through the whole codebase:
 
 ```
 mission_deck/
-├── __init__.py        # version / app metadata (__version__ = "0.1.0")
+├── __init__.py        # version / app metadata (__version__ = "0.2.0")
 ├── __main__.py        # `python -m mission_deck` → app.main()
 ├── config.py          # locate / load / structurally validate JSON
 ├── models.py          # Site → Room → Device typed models + registry

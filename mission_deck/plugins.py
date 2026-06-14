@@ -2,16 +2,14 @@
 
 A GUI surface over the registries that already exist in the codebase —
 **monitors** (how a device's reachability is judged, see ``network.py``'s
-monitor registry), **device commands**, and the conceptual **config sources**
-& **notifiers**. Each real extension is a single decorator away; this screen is
-where an operator enables and configures them.
+monitor registry), **device commands**, and **config sources**. Each extension
+is a single decorator (or catalogue entry) away; this screen is where an
+operator enables and configures them.
 
-This is intentionally a *preview*, not a finished marketplace: only the
-mechanics that drive the rest of the app are wired up. Activating a plugin that
-contributes a nav tile (today: **Cloud Sync**) makes that tile appear in the
-left rail — that is the "downloaded plugins show up in the sidebar" behaviour.
-Everything else is eye candy with a "coming soon" badge so the shape of the
-final screen is visible without pretending the integrations exist yet.
+Built-in monitors ship always-on. Activating a plugin that contributes a nav
+tab (today: **Cloud Sync**, a working HTTPS config source) makes that tab
+appear in the top nav bar; deactivating removes it. Activation state persists
+per-user in ``AppState.enabled_plugins``.
 """
 
 from __future__ import annotations
@@ -35,7 +33,7 @@ from mission_deck.ui import font
 class PluginSpec:
     """Static description of a plugin shown on the Plugins screen.
 
-    ``tile`` — when set, ``(view_key, label, icon)`` for a rail button that
+    ``tile`` — when set, ``(view_key, label, icon)`` for a nav-bar tab that
     appears only while the plugin is enabled. ``builtin`` plugins are always on
     and cannot be toggled (the tcp/http monitors that already ship).
     """
@@ -53,14 +51,23 @@ class PluginSpec:
 
 
 # The plugin catalogue. Today this is the source of truth for both the Plugins
-# screen and the rail tiles; a real loader would discover these instead.
+# screen and the nav tabs; a real loader would discover these instead.
 PLUGINS: list[PluginSpec] = [
     PluginSpec(
         id="cloud_sync", name="Cloud Sync", by="mission-deck core", icon="cloud",
         accent="#2b9be6",
-        desc="Store config.json in OneDrive / SharePoint so every operator "
-             "workstation loads the same estate.",
+        desc="Pull config.json from a central HTTPS URL (OneDrive/SharePoint "
+             "direct link, intranet, Git raw) so every operator workstation "
+             "loads the same estate. Validated, cached locally, audited.",
         tags=["config", "cloud"], tile=("cloud", "Cloud Sync", "cloud"),
+    ),
+    PluginSpec(
+        id="activity_log", name="Activity Log", by="mission-deck core", icon="clock",
+        accent=COLORS["accent2"],
+        desc="A browsable, filterable window onto the audit trail — who ran which "
+             "command, on which device, when, and whether it succeeded. Reads the "
+             "local audit.log only; nothing leaves the workstation.",
+        tags=["audit", "compliance"], tile=("activity", "Activity", "clock"),
     ),
     PluginSpec(
         id="monitor_tcp", name="TCP Monitor", by="mission-deck core", icon="pulse",
@@ -82,6 +89,15 @@ PLUGINS: list[PluginSpec] = [
              "open TCP port. Opt in per device with \"monitor\": \"ping\".",
         tags=["monitor"],
     ),
+    PluginSpec(
+        id="monitor_tls", name="TLS / Certificate Monitor", by="mission-deck core",
+        icon="external", accent=COLORS["accent2"], builtin=True, badge="Built-in",
+        desc="Confirms a device completes a TLS handshake on its HTTPS port — a "
+             "stronger signal than an open socket for web-managed gear. Opt in "
+             "per device with \"monitor\": \"tls\"; set \"verify_tls\": true to "
+             "require a valid certificate.",
+        tags=["monitor"],
+    ),
 ]
 
 _PLUGIN_COLUMNS = 2
@@ -95,7 +111,7 @@ def plugin_by_id(plugin_id: str) -> PluginSpec | None:
 
 
 def tile_plugins() -> list[PluginSpec]:
-    """Plugins that contribute a rail tile when enabled."""
+    """Plugins that contribute a nav-bar tab when enabled."""
 
     return [spec for spec in PLUGINS if spec.tile is not None]
 
@@ -104,16 +120,16 @@ def spec_note(master, text: str) -> ctk.CTkFrame:
     """A dashed accent banner used to annotate a view for the developer spec."""
 
     frame = ctk.CTkFrame(
-        master, corner_radius=CORNER, fg_color=COLORS["accent_soft"],
-        border_width=1, border_color=COLORS["accent_line"],
+        master, corner_radius=CORNER, fg_color=COLORS["accent2_soft"],
+        border_width=1, border_color=COLORS["accent2_line"],
     )
     frame.grid_columnconfigure(1, weight=1)
     ctk.CTkLabel(
-        frame, text="", image=icon("bolt", 15, COLORS["accent_text"]),
+        frame, text="", image=icon("bolt", 15, COLORS["accent2_text"]),
     ).grid(row=0, column=0, padx=(12, 6), pady=10, sticky="n")
     ctk.CTkLabel(
         frame, text=text, anchor="w", justify="left", wraplength=1100,
-        font=font(12), text_color=COLORS["accent_text"],
+        font=font(12), text_color=COLORS["accent2_text"],
     ).grid(row=0, column=1, sticky="ew", padx=(0, 12), pady=10)
     return frame
 
@@ -196,7 +212,7 @@ class PluginCard(ctk.CTkFrame):
         elif spec.badge == "Coming soon":
             text, fg, tc = "Coming soon", COLORS["card_2"], COLORS["text_faint"]
         else:
-            text, fg, tc = "Available", COLORS["accent_soft"], COLORS["accent_text"]
+            text, fg, tc = "Available", COLORS["accent2_soft"], COLORS["accent2_text"]
         return ctk.CTkLabel(
             master, text=f" {text} ", corner_radius=8, height=18,
             font=font(10, weight="bold"), fg_color=fg, text_color=tc,
@@ -218,10 +234,10 @@ class PluginsView(ctk.CTkScrollableFrame):
 
         note = spec_note(
             self,
-            "Plugins extend three registries already in the codebase — monitors, "
-            "device commands, and the planned config sources & notifiers. Activate "
-            "a plugin to drop its tile into the rail; the marketplace below is a "
-            "preview.  (Coming soon.)",
+            "Plugins extend registries already in the codebase — monitors, device "
+            "commands and config sources. Built-in monitors are always on; toggle "
+            "anything else and its nav tab appears or disappears instantly. New "
+            "monitor types are one @register_monitor decorator away.",
         )
         note.grid(row=1, column=0, sticky="ew", pady=(0, GAP))
 
@@ -249,13 +265,13 @@ class PluginsView(ctk.CTkScrollableFrame):
         )
         hero.grid_columnconfigure(1, weight=1)
         tile = ctk.CTkFrame(
-            hero, width=52, height=52, corner_radius=14, fg_color=COLORS["accent_soft"],
-            border_width=1, border_color=COLORS["accent_line"],
+            hero, width=52, height=52, corner_radius=14, fg_color=COLORS["accent2_soft"],
+            border_width=1, border_color=COLORS["accent2_line"],
         )
         tile.grid(row=0, column=0, rowspan=2, padx=(PAD, GAP), pady=PAD, sticky="n")
         tile.grid_propagate(False)
         ctk.CTkLabel(
-            tile, text="", image=icon("plugins", 26, COLORS["accent_text"]),
+            tile, text="", image=icon("plugins", 26, COLORS["accent2_text"]),
         ).place(relx=0.5, rely=0.5, anchor="center")
         ctk.CTkLabel(
             hero, text="Extend mission-deck", anchor="w",
@@ -263,7 +279,7 @@ class PluginsView(ctk.CTkScrollableFrame):
         ).grid(row=0, column=1, sticky="ew", padx=(0, PAD), pady=(PAD, 0))
         ctk.CTkLabel(
             hero, text="Activate a plugin to add monitors, notifiers and config "
-            "sources. Tiles for what you turn on appear in the rail.",
+            "sources. Tabs for what you turn on appear in the top nav bar.",
             anchor="w", justify="left", wraplength=720,
             font=font(12), text_color=COLORS["text_muted"],
         ).grid(row=1, column=1, sticky="ew", padx=(0, PAD), pady=(2, PAD))

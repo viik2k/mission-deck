@@ -72,7 +72,7 @@ mission-deck serves three audiences, and this wiki is organised around them:
 | Config location | git-ignored; repo ships `config.example.json` (dummy data only) |
 | Uptime history | Best-effort SQLite `history.db` in the per-user dir |
 | Test suite | None yet — manual verification against `config.example.json` |
-| Current version | `0.1.0` (see `mission_deck/__init__.py`) |
+| Current version | `0.2.0` (see `mission_deck/__init__.py`) |
 
 ---
 

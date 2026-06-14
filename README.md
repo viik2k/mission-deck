@@ -32,7 +32,30 @@ click** (the headline feature of the original tool).
   room's devices as cards grouped by category (Control Processors, PTZ Cameras,
   Audio DSPs, Displays, Document Cameras, Recorders, Video Matrix/Encoders/
   Decoders, Video Conferencing, …).
-- **Estate Overview** — a second top-level view (sidebar "⌂ Overview") that
+- **Top navigation** — a horizontal nav bar with labelled view tabs
+  (Overview, Rooms, Dashboards, Plugins, plus tabs contributed by activated
+  plugins), a live **"N offline" attention badge** that jumps straight to the
+  overview, search, settings and the signed-in operator chip.
+- **Command palette** — press **Ctrl+K** anywhere to fuzzy-jump to any room,
+  any device (opens its control panel), or any global action (estate sweep,
+  export, settings…). Keyboard shortcuts throughout: Ctrl+1..4 switch views,
+  Ctrl+F filters rooms, F5 re-probes whatever is on screen, and F1 shows the
+  full shortcut reference.
+- **Toast notifications** — background outcomes pop as non-blocking toasts:
+  sweep finished (healthy / still-offline summary), devices that **newly went
+  offline** since the last sweep (click to jump to the overview), report
+  exported, settings saved.
+- **Status filters** — one-click chips scope a room's device grid to
+  all / online / offline, and re-evaluate live as check results land.
+- **Composable dashboards** — build your own monitoring board from a widget
+  catalogue: KPI tiles, 24-hour **uptime and latency trend charts** (drawn
+  from the history database), offline / recorder / room-uptime lists. Layouts
+  persist per-user, refresh live with every sweep, and reset in one click.
+- **Cloud Sync** — point every workstation at one HTTPS URL (OneDrive /
+  SharePoint direct link, intranet server, Git raw) and sync the estate
+  config centrally. Downloads are schema-validated, cached locally for
+  offline-safe startup, and audited.
+- **Estate Overview** — a second top-level view (the "Overview" tab) that
   answers "how is the whole estate right now?" as a flat, single-column report:
   a headline stat strip (rooms, devices, online, offline, healthy rooms), a
   "needs attention" list of offline devices, an estate-wide recorders section,

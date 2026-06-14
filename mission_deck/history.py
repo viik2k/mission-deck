@@ -285,6 +285,77 @@ class HistoryStore:
             return None
         return (online or 0) * 100.0 / total
 
+    def uptime_buckets(
+        self, since_seconds: int = 86400, buckets: int = 24, room_id: str | None = None
+    ) -> list[float | None]:
+        """Estate (or one room's) online %, bucketed across the window.
+
+        Returns exactly ``buckets`` values oldest-first; a bucket with no
+        samples is ``None`` so trend plots can show a gap instead of a fake 0%.
+        One grouped scan — the dashboard trend widget calls this per refresh.
+        """
+
+        result: list[float | None] = [None] * max(1, buckets)
+        if self._conn is None or buckets <= 0 or since_seconds <= 0:
+            return result
+        cutoff = int(time.time()) - since_seconds
+        where = "ts >= ?"
+        params: tuple = (cutoff,)
+        if room_id is not None:
+            where += " AND room_id = ?"
+            params = (cutoff, room_id)
+        with self._lock:
+            try:
+                cur = self._conn.execute(
+                    "SELECT CAST((ts - ?) * ? / ? AS INTEGER) AS bucket, "
+                    "SUM(CASE WHEN status = ? THEN 1 ELSE 0 END), COUNT(*) "
+                    f"FROM samples WHERE {where} GROUP BY bucket",
+                    (cutoff, buckets, since_seconds, DeviceStatus.ONLINE.value, *params),
+                )
+                rows = cur.fetchall()
+            except sqlite3.Error as exc:
+                logger.warning("Could not read uptime buckets: %s", exc)
+                return result
+        for bucket, online, total in rows:
+            if 0 <= bucket < buckets and total:
+                result[bucket] = (online or 0) * 100.0 / total
+        return result
+
+    def latency_buckets(
+        self, since_seconds: int = 86400, buckets: int = 24, room_id: str | None = None
+    ) -> list[float | None]:
+        """Estate (or one room's) average latency in ms, bucketed across the window.
+
+        Same shape/contract as :meth:`uptime_buckets`; only samples that carry
+        a latency reading contribute.
+        """
+
+        result: list[float | None] = [None] * max(1, buckets)
+        if self._conn is None or buckets <= 0 or since_seconds <= 0:
+            return result
+        cutoff = int(time.time()) - since_seconds
+        where = "ts >= ? AND latency_ms IS NOT NULL"
+        params: tuple = ()
+        if room_id is not None:
+            where += " AND room_id = ?"
+            params = (room_id,)
+        with self._lock:
+            try:
+                cur = self._conn.execute(
+                    "SELECT CAST((ts - ?) * ? / ? AS INTEGER) AS bucket, "
+                    "AVG(latency_ms) "
+                    f"FROM samples WHERE {where} GROUP BY bucket",
+                    (cutoff, buckets, since_seconds, cutoff, *params),
+                )
+                rows = cur.fetchall()
+            except sqlite3.Error as exc:
+                logger.warning("Could not read latency buckets: %s", exc)
+                return result
+        for bucket, avg in rows:
+            if 0 <= bucket < buckets and avg is not None:
+                result[bucket] = float(avg)
+        return result
+
     def device_series(
         self, device_id: str, since_seconds: int = 86400, limit: int = 240
     ) -> list[tuple[int, DeviceStatus]]:

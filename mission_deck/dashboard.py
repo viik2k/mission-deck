@@ -95,21 +95,47 @@ def _rule(master) -> ctk.CTkFrame:
 
 
 class _SectionHeader(ctk.CTkFrame):
-    """``CAPTION ── count ───────────`` — a flat section divider with a count."""
+    """``▼ CAPTION ── count ───────────`` — collapseable section divider."""
 
-    def __init__(self, master, text: str):
+    def __init__(self, master, text: str, tint: str | None = None):
         super().__init__(master, fg_color="transparent")
-        self.grid_columnconfigure(2, weight=1)
+        self.grid_columnconfigure(3, weight=1)
+        self._collapsed = False
+        self._on_toggle = None
+
+        # A tinted chevron is a quiet colour landmark for the section, so the
+        # flat report scans by hue (red = attention, amber = recorders, …).
+        self._chevron = ctk.CTkLabel(
+            self, text="▼", width=14,
+            font=font(9, mono=True), text_color=tint or COLORS["text_faint"],
+        )
+        self._chevron.grid(row=0, column=0, sticky="w", padx=(0, 2))
         ctk.CTkLabel(
             self, text=text.upper(), anchor="w",
             font=font(10, mono=True, weight="bold"), text_color=COLORS["text_faint"],
-        ).grid(row=0, column=0, sticky="w")
+        ).grid(row=0, column=1, sticky="w")
         self._count = ctk.CTkLabel(
             self, text="", anchor="w",
             font=font(10, mono=True), text_color=COLORS["text_faint"],
         )
-        self._count.grid(row=0, column=1, sticky="w", padx=(8, 0))
-        _rule(self).grid(row=0, column=2, sticky="ew", padx=(GAP, 0))
+        self._count.grid(row=0, column=2, sticky="w", padx=(8, 0))
+        _rule(self).grid(row=0, column=3, sticky="ew", padx=(GAP, 0))
+
+        for widget in [self, *_descendants(self)]:
+            widget.bind("<Button-1>", lambda _e: self._toggle())
+            try:
+                widget.configure(cursor="hand2")
+            except tk.TclError:
+                pass
+
+    def _toggle(self) -> None:
+        self._collapsed = not self._collapsed
+        self._chevron.configure(text="▶" if self._collapsed else "▼")
+        if self._on_toggle:
+            self._on_toggle(self._collapsed)
+
+    def bind_container(self, container: ctk.CTkFrame) -> None:
+        self._on_toggle = lambda c: container.grid_remove() if c else container.grid()
 
     def set_count(self, text: str, color: str | None = None) -> None:
         self._count.configure(text=text, text_color=color or COLORS["text_faint"])
@@ -177,28 +203,33 @@ class DashboardView(ctk.CTkFrame):
         row += 1
 
         # Flat sections, one under another, separated by their header rules.
-        self._hdr_attention = _SectionHeader(body, "Needs attention")
+        # Each header carries a colour landmark keyed to its meaning.
+        self._hdr_attention = _SectionHeader(body, "Needs attention", COLORS["accent"])
         self._hdr_attention.grid(row=row, column=0, sticky="ew", pady=(PAD, 4))
         row += 1
         self._attention = self._section_container(body, row)
+        self._hdr_attention.bind_container(self._attention)
         row += 1
 
-        self._hdr_recorders = _SectionHeader(body, "Recorders")
+        self._hdr_recorders = _SectionHeader(body, "Recorders", COLORS["warn"])
         self._hdr_recorders.grid(row=row, column=0, sticky="ew", pady=(PAD, 4))
         row += 1
         self._recorders = self._section_container(body, row)
+        self._hdr_recorders.bind_container(self._recorders)
         row += 1
 
-        self._hdr_uptime = _SectionHeader(body, "Uptime · last 24h")
+        self._hdr_uptime = _SectionHeader(body, "Uptime · last 24h", COLORS["accent2"])
         self._hdr_uptime.grid(row=row, column=0, sticky="ew", pady=(PAD, 4))
         row += 1
         self._uptime = self._section_container(body, row)
+        self._hdr_uptime.bind_container(self._uptime)
         row += 1
 
         self._hdr_activity = _SectionHeader(body, "Recent activity")
         self._hdr_activity.grid(row=row, column=0, sticky="ew", pady=(PAD, 4))
         row += 1
         self._activity = self._section_container(body, row)
+        self._hdr_activity.bind_container(self._activity)
 
     def _section_container(self, body, row: int) -> ctk.CTkFrame:
         container = ctk.CTkFrame(body, fg_color="transparent")
