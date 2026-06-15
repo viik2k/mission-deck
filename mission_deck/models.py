@@ -27,8 +27,9 @@ Design goals
 from __future__ import annotations
 
 import enum
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
-from typing import Any, Callable, Iterable
+from typing import Any
 
 from .config import SUPPORTED_SCHEMA_VERSION, LoadedConfig
 
@@ -125,7 +126,7 @@ class Device:
     # Construction / validation
     # ------------------------------------------------------------------ #
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "Device":
+    def from_dict(cls, data: dict[str, Any]) -> Device:
         """Build the appropriate Device subclass from one JSON device entry.
 
         Dispatches on the ``type`` field to a registered subclass, falling back
@@ -481,7 +482,7 @@ class Room:
     extra: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "Room":
+    def from_dict(cls, data: dict[str, Any]) -> Room:
         if not isinstance(data, dict):
             raise DeviceConfigError(
                 f"room entry must be an object, got {type(data).__name__}"
@@ -608,7 +609,7 @@ class Site:
     settings: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
-    def from_loaded_config(cls, loaded: LoadedConfig) -> "Site":
+    def from_loaded_config(cls, loaded: LoadedConfig) -> Site:
         """Build a :class:`Site` from a :class:`~mission_deck.config.LoadedConfig`.
 
         The config layer has already validated the *structure* (rooms is a

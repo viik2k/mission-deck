@@ -123,7 +123,7 @@ class AppState:
 
     # ------------------------------------------------------------------ #
     @classmethod
-    def load(cls) -> "AppState":
+    def load(cls) -> AppState:
         path = state_path()
         try:
             data = json.loads(path.read_text(encoding="utf-8"))

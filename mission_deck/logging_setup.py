@@ -37,7 +37,7 @@ import logging.handlers
 import os
 import sys
 import threading
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -191,7 +191,7 @@ def audit(event: str, **fields: Any) -> None:
     """
 
     record = {
-        "ts": datetime.now(timezone.utc).isoformat(timespec="milliseconds"),
+        "ts": datetime.now(datetime.UTC).isoformat(timespec="milliseconds"),
         "event": event,
         "user": current_user(),
     }

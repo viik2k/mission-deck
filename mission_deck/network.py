@@ -33,9 +33,10 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from typing import Any, Awaitable, Callable, Iterable, Mapping, Sequence
+from typing import Any
 
 from .models import Device, DeviceStatus, RecordingStatus
 
@@ -126,8 +127,10 @@ async def _tcp_monitor(device: Device, timeout: float) -> CheckResult:
     try:
         connect = asyncio.open_connection(device.host, port)
         _reader, writer = await asyncio.wait_for(connect, timeout=timeout)
-    except asyncio.TimeoutError:
-        logger.debug("Probe %s (%s:%s) timed out after %.1fs", device.id, device.host, port, timeout)
+    except TimeoutError:
+        logger.debug(
+            "Probe %s (%s:%s) timed out after %.1fs", device.id, device.host, port, timeout
+        )
         return CheckResult(device.id, DeviceStatus.OFFLINE, None, "timed out")
     except (OSError, asyncio.CancelledError) as exc:
         # Connection refused, host unreachable, DNS failure, etc.
@@ -216,7 +219,7 @@ async def _ping_monitor(device: Device, timeout: float) -> CheckResult:
     try:
         # ping enforces its own timeout; the extra margin only guards a hung process.
         stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout_s + 2.0)
-    except asyncio.TimeoutError:
+    except TimeoutError:
         proc.kill()
         logger.debug("Ping probe %s (%s) timed out after %.1fs", device.id, device.host, timeout_s)
         return CheckResult(device.id, DeviceStatus.OFFLINE, None, "timed out")
@@ -272,16 +275,20 @@ async def _tls_monitor(device: Device, timeout: float) -> CheckResult:
             device.host, port, ssl=context, server_hostname=device.host
         )
         _reader, writer = await asyncio.wait_for(connect, timeout=timeout)
-    except asyncio.TimeoutError:
-        logger.debug("TLS probe %s (%s:%s) timed out after %.1fs", device.id, device.host, port, timeout)
+    except TimeoutError:
+        logger.debug(
+            "TLS probe %s (%s:%s) timed out after %.1fs", device.id, device.host, port, timeout
+        )
         return CheckResult(device.id, DeviceStatus.OFFLINE, None, "timed out")
     except ssl.SSLCertVerificationError as exc:
         # Subclass of SSLError/OSError — must be caught before the generic arm.
         logger.debug("TLS probe %s (%s:%s) cert rejected: %s", device.id, device.host, port, exc)
-        return CheckResult(device.id, DeviceStatus.OFFLINE, None, f"certificate rejected: {exc.reason or exc}")
+        reason = exc.reason or exc
+        return CheckResult(device.id, DeviceStatus.OFFLINE, None, f"certificate rejected: {reason}")
     except (OSError, ssl.SSLError, asyncio.CancelledError) as exc:
         logger.debug("TLS probe %s (%s:%s) failed: %s", device.id, device.host, port, exc)
-        return CheckResult(device.id, DeviceStatus.OFFLINE, None, str(exc) or "tls handshake failed")
+        msg = str(exc) or "tls handshake failed"
+        return CheckResult(device.id, DeviceStatus.OFFLINE, None, msg)
 
     latency_ms = (time.perf_counter() - start) * 1000.0
     writer.close()
@@ -416,7 +423,7 @@ def http_request(
         request.add_header(str(key), str(value))
     if auth is not None:
         user, password = auth[0], auth[1]
-        token = base64.b64encode(f"{user}:{password}".encode("utf-8")).decode("ascii")
+        token = base64.b64encode(f"{user}:{password}".encode()).decode("ascii")
         request.add_header("Authorization", f"Basic {token}")
 
     context: ssl.SSLContext | None = None
@@ -458,7 +465,9 @@ def tcp_send(
 
     if not port:
         raise ControlError("No port configured for this command.")
-    logger.debug("TCP send %d bytes to %s:%s (read_response=%s)", len(payload), host, port, read_response)
+    logger.debug(
+        "TCP send %d bytes to %s:%s (read_response=%s)", len(payload), host, port, read_response
+    )
     try:
         with socket.create_connection((host, port), timeout=timeout) as sock:
             sock.sendall(payload)
@@ -468,7 +477,7 @@ def tcp_send(
             sock.settimeout(timeout)
             try:
                 data = sock.recv(2048)
-            except socket.timeout:
+            except TimeoutError:
                 logger.info("TCP sent to %s:%s; no reply before timeout", host, port)
                 return "Sent; no response (timed out waiting for reply)"
             text = data.decode("utf-8", errors="replace").strip()
@@ -506,7 +515,7 @@ def fetch_recording_status(
                 else:
                     return RecordingStatus.UNKNOWN
         return _parse_recording_value(data)
-    except (urllib.error.URLError, OSError, socket.timeout) as exc:
+    except (urllib.error.URLError, OSError, TimeoutError) as exc:
         logger.debug("Recording status fetch from %s failed: %s", url, exc)
         return RecordingStatus.UNKNOWN
     except (ValueError, TypeError, KeyError) as exc:

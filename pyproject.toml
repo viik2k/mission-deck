@@ -1,0 +1,30 @@
+[project]
+name = "mission-deck"
+version = "0.1.0"
+requires-python = ">=3.11"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+exclude = [
+    "mission_deck/app.py",
+    "mission_deck/activity.py",
+    "mission_deck/cloud.py",
+    "mission_deck/dashboard.py",
+    "mission_deck/dashboards.py",
+    "mission_deck/editors.py",
+    "mission_deck/icons.py",
+    "mission_deck/palette.py",
+    "mission_deck/plugins.py",
+    "mission_deck/toast.py",
+    "mission_deck/ui.py",
+]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.mypy]
+ignore_missing_imports = true

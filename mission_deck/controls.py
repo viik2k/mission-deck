@@ -36,8 +36,8 @@ the app, so they never freeze the UI.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable
 from urllib.parse import quote
 
 from mission_deck.browser import BrowserConfig, open_urls
@@ -173,11 +173,13 @@ def validate_command_spec(spec: dict) -> None:
     if protocol in ("http", "https"):
         if not str(spec.get("url") or "").strip():
             raise ControlError("An HTTP command needs a URL to request.")
-        if "auth" in spec and spec.get("auth") is not None and _parse_auth(spec.get("auth")) is None:
+        raw_auth = spec.get("auth")
+        if "auth" in spec and raw_auth is not None and _parse_auth(raw_auth) is None:
             raise ControlError(
                 "auth must be {\"username\": …, \"password\": …} or [username, password]."
             )
-        if "headers" in spec and spec.get("headers") is not None and not isinstance(spec.get("headers"), dict):
+        raw_headers = spec.get("headers")
+        if "headers" in spec and raw_headers is not None and not isinstance(raw_headers, dict):
             raise ControlError("headers must be an object of name/value pairs.")
     elif protocol == "tcp":
         payload = spec.get("payload")

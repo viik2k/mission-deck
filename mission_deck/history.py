@@ -77,7 +77,7 @@ class HistoryStore:
     # Lifecycle
     # ------------------------------------------------------------------ #
     @classmethod
-    def open(cls, path: Path | None = None) -> "HistoryStore":
+    def open(cls, path: Path | None = None) -> HistoryStore:
         """Open (creating if needed) the history database.
 
         Never raises: on any failure the returned store is *disabled* (a no-op

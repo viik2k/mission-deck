@@ -27,8 +27,8 @@ import shutil
 import subprocess
 import threading
 import webbrowser
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Iterable
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +58,7 @@ class BrowserConfig:
     new_window: bool = True
 
     @classmethod
-    def from_settings(cls, settings: dict) -> "BrowserConfig":
+    def from_settings(cls, settings: dict) -> BrowserConfig:
         """Build from the ``app`` settings block. Accepts a string or object.
 
         ``"browser": "firefox"``            -> by name
