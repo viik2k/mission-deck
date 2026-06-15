@@ -36,33 +36,51 @@ Three principles run through the whole codebase:
 mission_deck/
 ├── __init__.py        # version / app metadata (__version__ = "0.2.0")
 ├── __main__.py        # `python -m mission_deck` → app.main()
-├── config.py          # locate / load / structurally validate JSON
+├── config.py          # locate / load / structurally validate JSON; fetch+cache remote config
 ├── models.py          # Site → Room → Device typed models + registry
 ├── network.py         # async status probes (monitor registry) + HTTP/TCP control transports
 ├── controls.py        # build per-device control action lists
 ├── browser.py         # open URLs in the configured browser
 ├── history.py         # persisted uptime-history store (SQLite)
-├── dashboard.py       # estate-wide Overview view (KPIs / uptime / activity)
+├── dashboard.py       # estate-wide Overview view (flat status report)
+├── dashboards.py      # composable, user-ordered dashboard boards (widget catalogue)
+├── report.py          # estate status report export (CSV)
 ├── state.py           # persisted per-user preferences + recent files
 ├── theme.py           # colour palette + sizing tokens
+├── palette.py         # global command palette (Ctrl+K) fuzzy jump
+├── toast.py           # non-blocking toast notifications
+├── ui.py              # cached fonts, button/switch style tokens, PromptDialog
+├── icons.py           # vector icon factory (CTkImage)
+├── plugins.py         # Plugins screen + plugin catalogue (PluginSpec)
+├── cloud.py           # Cloud Sync view (HTTPS config source, plugin-gated)
+├── activity.py        # Activity Log view (browsable audit trail, plugin-gated)
 ├── logging_setup.py   # diagnostic + audit logging
 ├── editors.py         # in-app room/device/command editor dialogs
-└── app.py             # CustomTkinter UI + event orchestration (~2200 LOC)
+└── app.py             # CustomTkinter UI + event orchestration
 ```
 
 ### Responsibilities and constraints
 
 | Module | Job | Must NOT |
 |--------|-----|----------|
-| `config.py` | Find a config file, parse JSON, validate top-level shape; atomic save. | Touch the GUI or device internals. |
+| `config.py` | Find a config file, parse JSON, validate top-level shape; atomic save; fetch+cache a remote config (`fetch_remote_config` → `cloud-config.json`, stdlib `urllib`). | Touch the GUI or device internals. |
 | `models.py` | Turn raw config into typed `Site`/`Room`/`Device` objects; device registry. | Do I/O, GUI, or networking. Stays logging-free (purity). |
-| `network.py` | Async reachability probes via a pluggable **monitor registry** (`tcp`/`http`/`https`), bounded by a concurrency semaphore; blocking HTTP/TCP control transports; recording-status fetch. | Touch the GUI. Must be thread-safe; results via callback. |
+| `network.py` | Async reachability probes via a pluggable **monitor registry** (`tcp`/`http`/`https`/`ping`/`tls`), bounded by a concurrency semaphore; blocking HTTP/TCP control transports; recording-status fetch. | Touch the GUI. Must be thread-safe; results via callback. |
 | `controls.py` | Build `DeviceControl` action lists from config `commands` + built-in "Open Web UI". | Do the actual I/O itself (delegates to `network.py`). |
 | `browser.py` | Launch URLs via subprocess/`webbrowser`. | Import models or touch the GUI. |
-| `history.py` | Best-effort SQLite store of reachability samples; per-device/per-room uptime queries. | Anything beyond stdlib `sqlite3`; raising into callers. |
-| `dashboard.py` | Render the estate-wide Overview from live `Site` + `HistoryStore`. | Networking; touching worker threads. Presentation only, UI thread. |
+| `history.py` | Best-effort SQLite store of reachability samples; per-device/per-room uptime/latency queries. | Anything beyond stdlib `sqlite3`; raising into callers. |
+| `dashboard.py` | Render the estate-wide Overview (flat report) from live `Site` + `HistoryStore`. | Networking; touching worker threads. Presentation only, UI thread. |
+| `dashboards.py` | Render the user-composed **Dashboards** boards from a widget catalogue persisted in `AppState`. | Networking; same constraints as `dashboard.py`. Presentation only, UI thread. |
+| `report.py` | Build the estate status report (per-device status/latency/24h uptime) for CSV export. | GUI or networking; the UI picks the path and runs it off the Tk thread. |
 | `state.py` | Load/save per-user `state.json` (best-effort). | Break the app if the file is missing/corrupt. |
 | `theme.py` | Pure colour/size constants. | Contain logic. Stays logging-free. |
+| `palette.py` | Build & show the global command palette (Ctrl+K); fuzzy jump to rooms/devices/actions. | I/O. Items built from live `Site`; every action is a callback into `App`. |
+| `toast.py` | Non-blocking bottom-right toast stack (capped, auto-dismiss). | I/O. Callers pass finished strings. |
+| `ui.py` | Cached shared fonts, button/switch style tokens, `PromptDialog`. | Logic beyond presentation; cache resets per Tk root. |
+| `icons.py` | Vector icon factory (`CTkImage`). | Anything beyond presentation. |
+| `plugins.py` | The **Plugins** screen + the static plugin catalogue (`PluginSpec`). | Hold activation state (that lives in `AppState`). |
+| `cloud.py` | The **Cloud Sync** view (HTTPS config source, plugin-gated). | Do the download itself — delegates to `config.fetch_remote_config` off-thread. |
+| `activity.py` | The **Activity Log** view (browsable audit trail, plugin-gated). | Networking or writing; reads `logging_setup.tail_audit` (read-only). |
 | `logging_setup.py` | Configure diagnostic + audit logging; install excepthooks. | Use anything beyond stdlib; raise into callers. |
 | `editors.py` | Tkinter dialogs for editing rooms/devices/commands. | Bypass `models`/`config` validation. |
 | `app.py` | The CustomTkinter UI; marshals worker results onto the Tk thread. | Hold business rules that belong in `models`. |
@@ -75,6 +93,13 @@ app.py ── editors.py
   │  ├── browser.py
   │  ├── history.py ────────────────── models.py ── config.py
   │  ├── dashboard.py ── history.py + models.py + logging_setup.py
+  │  ├── dashboards.py ── history.py + models.py + logging_setup.py
+  │  ├── report.py ────── history.py + models.py
+  │  ├── palette.py ───── models.py
+  │  ├── plugins.py ───── state.py + icons.py + theme.py + ui.py
+  │  ├── cloud.py ─────── config.py (fetch_remote_config)
+  │  ├── activity.py ──── logging_setup.py (tail_audit)
+  │  ├── toast.py / icons.py / ui.py ── theme.py
   │  ├── state.py ──────────────────────────────── config.py
   │  ├── theme.py ── models.py
   │  └── logging_setup.py ───────────────────────── config.py
@@ -177,16 +202,28 @@ the wrong room. The estate sweep uses its own queue + generation counter.
 
 ## The Overview dashboard & estate-wide sweep
 
-The **Overview** (`dashboard.py`) is a second top-level view, swapped with the
-room panel in the same grid cell (`App.show_dashboard()` / `show_room_view()`;
-sidebar "⌂ Overview" button). It renders a KPI bar, an attention list (offline
-devices), a recorders panel, a per-room uptime panel, and a recent-activity feed
-(`logging_setup.tail_audit`). It is **pure presentation**: it reads live `Site`
-state plus the `HistoryStore` and calls back into `App` (refresh, toggle polling,
-jump to a room); it never touches the network itself. The destroy-and-rebuild
-list panels are guarded by **content signatures** and capped at `MAX_LIST_ROWS`,
-so a refresh whose data hasn't changed (or an estate with hundreds of offline
-devices) doesn't rebuild thousands of widgets.
+The **Overview** (`dashboard.py`) is a top-level view, swapped with the room
+panel in the same grid cell (`App.show_dashboard()` / `show_room_view()`;
+"OVERVIEW" tab in the top nav bar). It is deliberately **not** a bento grid of
+boxed cards: it renders as a flat, single-column report — a bare stat strip
+(rooms / devices / online / offline / healthy), then hairline-ruled sections for
+attention (offline devices), recorders, per-room 24h uptime and a
+recent-activity feed (`logging_setup.tail_audit`). It is **pure presentation**:
+it reads live `Site` state plus the `HistoryStore` and calls back into `App`
+(refresh, toggle polling, jump to a room); it never touches the network itself.
+The destroy-and-rebuild list sections are guarded by **content signatures** and
+capped at `MAX_LIST_ROWS`, so a refresh whose data hasn't changed (or an estate
+with hundreds of offline devices) doesn't rebuild thousands of widgets. The
+overview topbar also offers **EXPORT** — a CSV status report via `report.py`
+(written off the Tk thread; audited as `report.export`).
+
+The **Dashboards** tab (`dashboards.py`) is the user-composed counterpart: a
+board of widgets (KPI tiles, 24h uptime/latency trend bars via
+`history.uptime_buckets`/`latency_buckets`, offline/recorder/room-uptime/activity
+lists) added from a catalogue dialog, reordered/removed in place, and persisted
+as an ordered id list in `AppState.dashboard_widgets` (`None` = default starter
+board). It refreshes when a sweep/check finishes while it is the active view, and
+on navigate (throttled), mirroring the overview.
 
 `App.run_estate_sweep()` probes **all** rooms (`site.all_devices()`) using the
 same worker/queue/`after()` pattern as a room check but on its own queue +
@@ -239,17 +276,31 @@ down the `App` and re-enters discovery with the chosen file.
 
 ## UI composition (`app.py`)
 
+The window stacks top to bottom: a **top nav bar** (brand mark, labelled view
+tabs with an accent active-underline, a live "N OFFLINE" attention badge, the
+Ctrl+K search button, settings, and the operator chip), a slim **context bar**
+(breadcrumb + per-view actions, swapped on navigate), then the active view.
+There is no left icon rail — top-level navigation is horizontal. The Rooms view
+keeps its own **room sidebar** (collapsible city boxes). Plugin-contributed views
+(Cloud Sync, Activity) add/remove their nav tab at runtime via
+`App._add_nav_tab` / `_remove_nav_tab`.
+
 Key widget classes:
 
 | Class | Role |
 |-------|------|
-| `App(ctk.CTk)` | The main window; owns the sidebar, the swappable room/Overview panel, status bar, the result queue, and all orchestration. |
-| `DashboardView` | The estate-wide **Overview** (`dashboard.py`): KPI bar, attention/recorders/uptime/activity panels. Built once, repainted by `refresh()`. |
-| `RoomButton` | A sidebar room entry with a health dot. **Pooled** and rebound. |
+| `App(ctk.CTk)` | The main window; owns the top nav bar, context bar, the swappable views container, the result queue, and all orchestration. |
+| `NavTab` | One labelled tab in the top nav bar with an accent active-underline. |
+| `DashboardView` | The estate-wide **Overview** (`dashboard.py`): flat report — stat strip + attention/recorders/uptime/activity sections. Built once, repainted by `refresh()`. |
+| `DashboardsView` | The user-composed **Dashboards** board (`dashboards.py`): widgets from a catalogue, reordered/removed, persisted in `AppState`. |
+| `PluginsView` | The **Plugins** screen (`plugins.py`): the plugin catalogue with enable/disable toggles. |
+| `CloudSyncView` / `ActivityView` | Plugin-gated views (`cloud.py` / `activity.py`) whose nav tab appears only while the plugin is enabled. |
+| `RoomButton` | A Rooms-view sidebar entry with a health dot. **Pooled** and rebound. |
 | `CityGroup` | A collapsible city box; builds its room buttons **lazily** on first expand. |
 | `DeviceCard` | A device tile (name, description, address, status). **Pooled** and rebound via `set_device()`. |
 | `DeviceControlDialog` | Per-device control panel: Open Web UI, command buttons, recorder controls, edit affordances. |
-| `SettingsDialog` | Appearance, timeout, auto-refresh, browser, switch-config. |
+| `SettingsDialog` | Appearance, timeout, auto-refresh, browser, concurrency, switch-config. |
+| `CommandPalette` / `ShortcutsDialog` | Ctrl+K fuzzy jump (`palette.py`) and the F1 shortcut reference. |
 | `WelcomeWindow` | First-run chooser (open file / recent / demo). |
 | `editors.py` dialogs | `RoomEditorDialog`, `DeviceEditorDialog`, `CommandEditorDialog`. |
 
@@ -271,9 +322,18 @@ performance target the project explicitly designs for.
 | How status checks probe devices | `network.py` |
 | A new reachability check type | `network.py` (`@register_monitor`) |
 | The Overview / estate-wide health | `dashboard.py` + `app.run_estate_sweep` |
-| Uptime history / storage | `history.py` |
+| User-composed dashboard boards | `dashboards.py` (`WidgetSpec` / `WIDGETS`) |
+| The CSV status report | `report.py` |
+| Uptime / latency history / storage | `history.py` |
 | How a control command is built/run | `controls.py` + `network.py` |
 | How web UIs open | `browser.py` |
+| The Plugins screen / catalogue | `plugins.py` (`PluginSpec` / `PLUGINS`) |
+| Cloud Sync (remote config source) | `cloud.py` + `config.fetch_remote_config` |
+| The Activity Log view | `activity.py` |
+| The command palette (Ctrl+K) | `palette.py` |
+| Toast notifications | `toast.py` |
+| Icons | `icons.py` |
+| Shared fonts / button tokens / prompts | `ui.py` |
 | Colours / sizing | `theme.py` |
 | Logging or the audit trail | `logging_setup.py` |
 | Anything visual | `app.py` / `editors.py` |

@@ -31,20 +31,25 @@ python -m mission_deck
 - **Module boundaries** (well-defined, preserve them):
   - `config.py` — find/load/structurally validate JSON
   - `models.py` — typed `Site`/`Room`/`Device` models + `@register_device` registry
-  - `network.py` — async status checks (worker thread) via a pluggable **monitor registry** (`@register_monitor`: `tcp` default, `http`/`https`), bounded by a concurrency semaphore; also `http_request`/`http_get`/`tcp_send` for control actions
+  - `network.py` — async status checks (worker thread) via a pluggable **monitor registry** (`@register_monitor`: `tcp` default, `http`/`https`, `ping`/`icmp`, `tls`/`ssl`), bounded by a concurrency semaphore; also `http_request`/`http_get`/`tcp_send` for control actions
   - `controls.py` — `DeviceControl` objects from config `commands` entries + built-in "Open Web UI"
   - `browser.py` — launch URLs in configured browser via subprocess (Chromium gets `--new-window`)
-  - `history.py` — best-effort SQLite uptime-history store (samples per sweep; per-device/per-room uptime %)
-  - `dashboard.py` — estate-wide Overview view (KPIs, attention/recorders/uptime/activity panels); pure presentation
+  - `history.py` — best-effort SQLite uptime-history store (samples per sweep; per-device/per-room uptime % + latency buckets)
+  - `dashboard.py` — estate-wide Overview view (flat report: stat strip + attention/recorders/uptime/activity sections); pure presentation
   - `dashboards.py` — composable Dashboards board (widget catalogue, per-user layout in state.json); pure presentation
+  - `report.py` — estate status report export (CSV: per-device status, latency, 24h uptime); pure data-out
   - `cloud.py` — Cloud Sync view: pull config.json from an HTTPS URL via `config.fetch_remote_config`, cache locally, soft-restart onto it
-  - `state.py` — persisted `AppState` (recent configs, settings overrides, dashboard poll prefs)
+  - `activity.py` — Activity Log view: browsable/filterable reader of `audit.log` via `logging_setup.tail_audit`; read-only, plugin-gated
+  - `plugins.py` — Plugins screen + static plugin catalogue (`PluginSpec`); activation state lives in `AppState`
+  - `state.py` — persisted `AppState` (recent configs, settings overrides, dashboard poll prefs, enabled plugins)
   - `theme.py` — color palette + sizing tokens
+  - `ui.py` — cached shared fonts, button/switch style tokens, `PromptDialog`
+  - `icons.py` — vector icon factory (`CTkImage`); presentation only
   - `logging_setup.py` — diagnostic + audit logging; installs crash-capturing excepthooks
   - `editors.py` — in-app room/device/command editor dialogs (go through `models`/`config` validation)
   - `palette.py` — global command palette (Ctrl+K): fuzzy jump to rooms/devices/actions; presentation only
   - `toast.py` — non-blocking toast notifications (bottom-right stack); presentation only
-  - `app.py` — CustomTkinter GUI + orchestration (top nav bar, room view, Overview, estate sweep, keyboard shortcuts)
+  - `app.py` — CustomTkinter GUI + orchestration (top nav bar, room view, Overview, Dashboards, Plugins, estate sweep, keyboard shortcuts)
 
 ## Code conventions
 - Python 3.11+, `from __future__ import annotations`, full type hints.

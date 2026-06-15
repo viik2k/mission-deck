@@ -94,6 +94,12 @@ opts out with `verify_tls: false`.
 certificate; reserve `verify_tls: false` for trusted devices on a controlled
 network segment.
 
+> **Note — the `tls` *monitor* differs.** The optional TLS health-check monitor
+> (`"monitor": "tls"`) defaults to **not** verifying the certificate, because its
+> only job is to confirm the box is alive and negotiating TLS (LAN gear routinely
+> uses self-signed certs). Set `verify_tls: true` on that device to make an
+> untrusted/expired/wrong-host certificate count as offline.
+
 ---
 
 ## 4. The audit trail
@@ -149,7 +155,8 @@ mission-deck is intentionally conservative on the wire:
 - **Status checks are read-only and side-effect-free.** The default `tcp` monitor
   opens a TCP connection and immediately closes it — **no payload is sent**. The
   optional `http`/`https` monitor issues a single GET to a health/web URL and
-  reads the response; neither changes device state.
+  reads the response; the `ping` monitor sends one ICMP echo; the `tls` monitor
+  completes a TLS handshake and closes — none change device state.
 - **Control commands do exactly what config says** — a specific HTTP request or
   TCP payload to a specific device. There is no broadcast, scan, or discovery.
 - **Standard library only** for networking (`asyncio`, `socket`, `ssl`,

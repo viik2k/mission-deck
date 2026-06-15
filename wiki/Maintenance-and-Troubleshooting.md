@@ -182,7 +182,7 @@ with `config.example.json` to confirm the app itself is healthy.
 | Check | Expected result |
 |-------|-----------------|
 | Launch with valid config | Opens to the Overview (or last/first room per settings) |
-| Open the ⌂ Overview, click Refresh All | KPIs/attention/uptime panels populate after the sweep |
+| Open the Overview tab, click Refresh All | Stat strip / attention / uptime sections populate after the sweep |
 | Launch with no config | Welcome screen |
 | Launch with broken config | Error dialog, then welcome screen |
 | Check Status on a reachable device | Green dot + latency |

@@ -48,40 +48,41 @@ and goes straight to your dashboard.
 
 ---
 
-## 2. The dashboard layout
+## 2. The window layout
 
-The main window has three regions:
+The window stacks top to bottom: a **top navigation bar**, a slim **context
+bar**, then the active view.
 
 ```
-┌───────────────┬───────────────────────────────────────────┐
-│  SIDEBAR      │  HEADER (room name, Check Status, Open Web) │
-│  ⌂ Overview   ├───────────────────────────────────────────┤
-│  search box   │                                             │
-│               │   DEVICE CARDS, grouped by category         │
-│  ▸ Melbourne  │   ┌───────────┐ ┌───────────┐ ┌──────────┐ │
-│    Courtroom1A│   │ Card      │ │ Card      │ │ Card     │ │
-│    Courtroom2B│   └───────────┘ └───────────┘ └──────────┘ │
-│  ▸ Sydney     │                                             │
-│  ▸ Brisbane   │                                             │
-│               ├───────────────────────────────────────────┤
-│  ⚙ Settings   │  STATUS BAR (config file, last action)      │
-└───────────────┴───────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────┐
+│ MISSION-DECK   Overview  Rooms  Dashboards  Plugins   2 OFFLINE  🔍 ⚙ ▢ │  ← top nav bar
+├──────────────────────────────────────────────────────────────────────┤
+│ Rooms › Melbourne › Courtroom 1A          Check Status   Open Web UIs   │  ← context bar
+├───────────────┬──────────────────────────────────────────────────────┤
+│  room sidebar │   DEVICE CARDS, grouped by category                    │
+│  search box   │   ┌───────────┐ ┌───────────┐ ┌──────────┐            │
+│  ▸ Melbourne  │   │ Card      │ │ Card      │ │ Card     │            │
+│    Courtroom1A│   └───────────┘ └───────────┘ └──────────┘            │
+│  ▸ Sydney     │                                                        │
+└───────────────┴──────────────────────────────────────────────────────┘
 ```
 
-- **Sidebar (left):** a **⌂ Overview** button, a search box, and the list of
-  rooms, grouped into collapsible **city boxes** (e.g. Melbourne, Sydney,
-  Brisbane).
-- **Main panel (right):** the selected room's devices, shown as **cards**
-  grouped by category (Control Processors, PTZ Cameras, Audio DSPs, Displays,
-  Document Cameras, Recorders, Video Matrix, Video Encoders/Decoders, Video
-  Conferencing, …).
-- **Header:** the room name plus the **Check Status** and **Open Web UIs**
-  actions.
-- **Status bar (bottom):** which config file is loaded and a one-line summary of
-  your most recent action.
+- **Top nav bar:** the brand mark, the labelled view tabs (**Overview**,
+  **Rooms**, **Dashboards**, **Plugins** — plus any plugin views you've enabled),
+  a live **"N OFFLINE"** attention badge that jumps to the Overview, the **search**
+  button (Ctrl+K command palette), the **settings** gear, and the operator chip.
+- **Context bar:** a breadcrumb of where you are plus the per-view actions (in the
+  Rooms view, **Check Status** and **Open Web UIs**).
+- **Rooms view:** a **room sidebar** (a search box and the rooms grouped into
+  collapsible **city boxes** — e.g. Melbourne, Sydney, Brisbane) beside the
+  selected room's devices, shown as **cards** grouped by category (Control
+  Processors, PTZ Cameras, Audio DSPs, Displays, Document Cameras, Recorders,
+  Video Matrix, Video Encoders/Decoders, Video Conferencing, …).
 
-Click **⌂ Overview** at the top of the sidebar at any time to switch to the
-estate-wide overview; click any room to switch back to the room view.
+Click any tab in the top nav bar to switch views; click a room in the Rooms
+sidebar to open it. Keyboard shortcuts: **Ctrl+K**/**Ctrl+P** command palette,
+**Ctrl+1..4** switch views, **Ctrl+F** filter rooms, **F5** re-probe the current
+view, **Ctrl+,** settings, **F1** the shortcut reference.
 
 ---
 
@@ -91,7 +92,7 @@ The **Overview** answers "how is the *whole* estate right now?" without clicking
 through every room. By default the app opens here (you can change that in
 Settings). It shows:
 
-- **KPI tiles** — total rooms, total devices, how many are **online** /
+- **Stat strip** — total rooms, total devices, how many are **online** /
   **offline**, and how many rooms are fully **healthy**.
 - **Needs attention** — every device currently **offline**, with its room and
   address. Click a row to jump straight into that room.
@@ -110,11 +111,42 @@ Settings). It shows:
   "Sweeping…" while it runs, and a "last sweep HH:MM:SS" stamp when done.
 - The **Auto** switch turns on a background sweep that re-runs on an interval, so
   a wall display stays current hands-free.
-- The Overview also has its own **⚙ settings** gear and shows the signed-in
-  operator name (the account every action is audited under).
+- **Export** writes a CSV status report (per-device status, latency and 24h
+  uptime) to a location you pick — handy for a shift handover or a ticket.
 
 > Uptime needs data: a room shows "—" until at least one sweep/check has recorded
 > a sample for it.
+
+---
+
+## 2b. Dashboards (your own board)
+
+The **Dashboards** tab is a board you compose yourself. Click **Add widget** to
+pick from a catalogue — KPI tiles, 24-hour **uptime** and **latency** trend bars,
+and offline / recorder / room-uptime / recent-activity lists — then drag to
+reorder or remove widgets in place. Your layout is saved per-operator and
+restored next launch. Like the Overview, the board refreshes whenever a sweep or
+room check finishes.
+
+---
+
+## 2c. Plugins (optional features)
+
+The **Plugins** tab is where you turn optional features on and off. The catalogue
+shows the four built-in **monitors** (TCP, HTTP/HTTPS, Ping, TLS — always on, used
+per device via the `monitor` config key) and two toggleable plugins:
+
+- **Cloud Sync** — pull `config.json` from a central **HTTPS** URL (a OneDrive /
+  SharePoint direct link, an intranet path, a Git raw URL) so every workstation
+  loads the same estate. Enabling it adds a **Cloud Sync** tab where you enter the
+  URL; the config is validated, cached locally and audited, then loaded via a
+  soft-restart.
+- **Activity Log** — adds an **Activity** tab: a full-screen, filterable reader of
+  the local audit trail (who ran which command, on which device, when, and whether
+  it succeeded). It reads `audit.log` only — nothing leaves the workstation.
+
+Enabling or disabling a plugin shows or hides its tab in the top nav bar
+immediately; the choice persists per operator.
 
 ---
 
@@ -281,6 +313,7 @@ persists across launches — you never edit JSON for these.
 | **Auto-refresh** | Enable/disable automatic re-checking of the current room and set the interval (seconds). |
 | **Open on Overview** | Whether the app starts on the estate Overview (on) or the last/first room (off). |
 | **Background sweep** | Enable/disable the Overview's automatic estate-wide sweep and set its interval (seconds). |
+| **Max concurrent probes** | How many device probes run at once during a check/sweep. `0` = automatic (default 128). Lower it on a constrained network. |
 | **Browser** | The browser used by **Open Web UIs**. Use the **Browse** button to point at a browser executable, or leave blank for the OS default. |
 | **Switch config** | Open a different `config.json`. This triggers a quick **soft-restart** so the new file loads cleanly. |
 
