@@ -138,6 +138,7 @@ All four must be non-empty strings, or the device is rejected with a
 | `web_path` | string | — | Path appended to the web-UI URL (e.g. `/admin`). |
 | `monitor` | string | `tcp` | How reachability is judged — `tcp`, `http`, or `https` (see [Monitors](#monitors)). |
 | `health_url` | string | — | URL the `http`/`https` monitor probes (else the device's `web_url`). |
+| `stream_url` | string | — | Live video feed (`rtsp://…` or `rtmp://…`). Adds a **Live View** pop-out window (single shared window, ffmpeg-decoded, with stream-drop detection and auto-reconnect). Requires ffmpeg on `PATH`, next to the exe, or via `MISSION_DECK_FFMPEG`. See `CONFIG.md` → *Live View Streams*. |
 | `commands` | array | — | Control action buttons (see [Control commands](#control-commands)). |
 
 Any **unknown keys** are preserved in the device's `extra` map for

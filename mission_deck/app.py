@@ -78,6 +78,8 @@ from mission_deck.models import (
 )
 from mission_deck.palette import CommandPalette
 from mission_deck.state import AppState
+from mission_deck.live_view import LiveViewWindow
+from mission_deck.stream import find_ffmpeg
 from mission_deck.toast import Toaster
 from mission_deck.theme import (
     CORNER,
@@ -609,6 +611,17 @@ class DeviceControlDialog(ctk.CTkToplevel):
 
         controls = controls_for(self.device, self.app.browser_cfg)
         row = 0
+        # Cameras (any device, really) with a configured stream_url get the
+        # live-video pop-out. Azure, not red: it is orientation, not alarm.
+        if self.device.stream_url:
+            ctk.CTkButton(
+                self._actions, text="◉ LIVE VIEW", height=40, anchor="w",
+                font=font(11, mono=True, weight="bold"),
+                command=self._open_live_view,
+                **style(BTN_OUTLINE, border_color=COLORS["accent2_line"],
+                        text_color=COLORS["accent2_text"]),
+            ).grid(row=row, column=0, sticky="ew", padx=8, pady=4)
+            row += 1
         if not controls:
             ctk.CTkLabel(
                 self._actions,
@@ -704,6 +717,13 @@ class DeviceControlDialog(ctk.CTkToplevel):
                 self.app._poll_recording(self.device, room)
 
         self.app.run_background(lambda: http_get(url, timeout), on_done)
+
+    def _open_live_view(self) -> None:
+        # Close first: this dialog holds a modal grab that would otherwise
+        # leave the pop-out window unclickable while the dialog is open.
+        app, device, room = self.app, self.device, self.app.current_room
+        self.destroy()
+        app.open_live_view(room, device)
 
     def _add_command(self) -> None:
         CommandEditorDialog(self.app, self.device, on_saved=self._build_actions)
@@ -1198,6 +1218,8 @@ class App(ctk.CTk):
         self._cloud_view: CloudView | None = None
         self._dashboards_view: DashboardsView | None = None
         self._palette: CommandPalette | None = None
+        # The single live-video pop-out (one ffmpeg feed at a time).
+        self._live_view: LiveViewWindow | None = None
 
         self._build_navbar()        # row 0: brand + tabs + global actions
         self._build_main_column()   # row 1: context bar + views container
@@ -2751,6 +2773,38 @@ class App(ctk.CTk):
     def _open_device_controls(self, device: Device) -> None:
         DeviceControlDialog(self, device)
 
+    def open_live_view(self, room: Room | None, device: Device) -> None:
+        """Pop out (or retarget) the single live-video window for ``device``.
+
+        One window and one ffmpeg decode app-wide: opening a second camera
+        swaps the feed in the existing window instead of stacking video
+        surfaces on Tk.
+        """
+
+        if not device.stream_url:
+            return
+        if room is None:
+            room = next((r for r in self.site.rooms if device in r.devices), None)
+        if room is None:
+            return
+        if find_ffmpeg() is None:
+            audit("stream.open", device_id=device.id, device_name=device.name,
+                  ok=False, error="ffmpeg not found")
+            messagebox.showerror(
+                __app_name__,
+                "Live view needs ffmpeg to decode the camera stream.\n\n"
+                "Install ffmpeg and put it on PATH, place ffmpeg.exe next to "
+                "mission-deck.exe, or point the MISSION_DECK_FFMPEG "
+                "environment variable at the binary.",
+            )
+            return
+        if self._live_view is not None and self._live_view.winfo_exists():
+            self._live_view.show_device(room, device)
+            self._live_view.lift()
+            self._live_view.focus_force()
+        else:
+            self._live_view = LiveViewWindow(self, room, device)
+
     def open_settings(self) -> None:
         SettingsDialog(self)
 
@@ -2781,6 +2835,13 @@ class App(ctk.CTk):
     def destroy(self) -> None:
         """Capture the window geometry before tearing down (saved by main())."""
 
+        # Stop the live-view ffmpeg process explicitly: a cascaded Tk teardown
+        # destroys the Toplevel at C level without running its close() path.
+        if self._live_view is not None and self._live_view.winfo_exists():
+            try:
+                self._live_view.close()
+            except Exception:
+                logger.debug("Could not close live view cleanly", exc_info=True)
         try:
             if self.state() == "zoomed":
                 self.app_state.window_geometry = "zoomed"
