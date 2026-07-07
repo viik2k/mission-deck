@@ -72,6 +72,8 @@ mission_deck/
 | `dashboard.py` | Render the estate-wide Overview (flat report) from live `Site` + `HistoryStore`. | Networking; touching worker threads. Presentation only, UI thread. |
 | `dashboards.py` | Render the user-composed **Dashboards** boards from a widget catalogue persisted in `AppState`. | Networking; same constraints as `dashboard.py`. Presentation only, UI thread. |
 | `report.py` | Build the estate status report (per-device status/latency/24h uptime) for CSV export. | GUI or networking; the UI picks the path and runs it off the Tk thread. |
+| `stream.py` | Decode a camera's RTSP/RTMP feed via an external **ffmpeg** process into raw RGB frames; `StreamWorker` publishes the newest frame into a lock-protected slot, with watchdog stall detection + backoff reconnect. | Touch the GUI. Must be thread-safe; the UI pulls, the worker never pushes. |
+| `live_view.py` | The **Live View** pop-out window (singleton, one feed/ffmpeg at a time): status pill, drop toasts, camera switcher, snapshot, pin. | Networking or blocking on the pipe; polls `StreamWorker` on the Tk timer. Presentation only, UI thread. |
 | `state.py` | Load/save per-user `state.json` (best-effort). | Break the app if the file is missing/corrupt. |
 | `theme.py` | Pure colour/size constants. | Contain logic. Stays logging-free. |
 | `palette.py` | Build & show the global command palette (Ctrl+K); fuzzy jump to rooms/devices/actions. | I/O. Items built from live `Site`; every action is a callback into `App`. |
@@ -298,7 +300,8 @@ Key widget classes:
 | `RoomButton` | A Rooms-view sidebar entry with a health dot. **Pooled** and rebound. |
 | `CityGroup` | A collapsible city box; builds its room buttons **lazily** on first expand. |
 | `DeviceCard` | A device tile (name, description, address, status). **Pooled** and rebound via `set_device()`. |
-| `DeviceControlDialog` | Per-device control panel: Open Web UI, command buttons, recorder controls, edit affordances. |
+| `DeviceControlDialog` | Per-device control panel: Open Web UI, Live View, command buttons, recorder controls, edit affordances. |
+| `LiveViewWindow` | The singleton camera pop-out (`live_view.py`): polls a `StreamWorker` frame slot on the Tk timer; status pill, drop toasts, switcher, snapshot, pin. |
 | `SettingsDialog` | Appearance, timeout, auto-refresh, browser, concurrency, switch-config. |
 | `CommandPalette` / `ShortcutsDialog` | Ctrl+K fuzzy jump (`palette.py`) and the F1 shortcut reference. |
 | `WelcomeWindow` | First-run chooser (open file / recent / demo). |

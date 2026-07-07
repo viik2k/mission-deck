@@ -110,6 +110,7 @@ Each object in a room's `devices` array represents one piece of AV equipment.
 | `health_url` | string | — | URL the `http`/`https` monitor probes (falls back to the device's `web_url`) |
 | `tls_port` | integer | — | Port the `tls` monitor handshakes on (falls back to the device's `port`, else `443`) |
 | `verify_tls` | boolean | `false` | When `true`, the `tls` monitor rejects an untrusted/expired/wrong-host certificate (also honoured by `http`/`https` commands) |
+| `stream_url` | string | — | Live video feed (`rtsp://…` or `rtmp://…`) — adds a **Live View** pop-out for the device (see [Live View Streams](#live-view-streams)) |
 | `commands` | array | — | Config-driven control buttons — see [Control Commands](#control-commands) |
 
 > **Control port vs. web UI:** the status check uses the device's *monitor*
@@ -158,6 +159,46 @@ these optional keys:
 The status value is interpreted leniently (booleans, `0/1`, and strings like
 `recording`/`active`/`on` → **Recording**; `paused`/`suspended` → **Paused**;
 `idle`/`stopped`/`off` → **Idle**). Any network or parse error yields **Unknown**.
+
+---
+
+## Live View Streams
+
+Any device with a `stream_url` key (aimed at PTZ cameras, most of which expose
+an RTSP endpoint out of the box) gets a **◉ LIVE VIEW** button in its control
+panel and a `Live view — …` entry in the command palette:
+
+```jsonc
+{
+  "id": "1a-ptz-judge",
+  "type": "ptz_camera",
+  "host": "10.10.1.21",
+  "stream_url": "rtsp://10.10.1.21/media/video1"   // or "rtmp://server/live/cam"
+}
+```
+
+Notes:
+
+- **One feed at a time.** There is a single pop-out window app-wide; opening
+  another camera (or using the in-window camera switcher) swaps the feed
+  rather than stacking video decoders — deliberate, to keep the UI light.
+- **ffmpeg required.** Decoding uses an external `ffmpeg` binary found via the
+  `MISSION_DECK_FFMPEG` environment variable, an `ffmpeg.exe` next to
+  `mission-deck.exe`, or `PATH`. Without it the Live View button explains
+  what to install; nothing else in the app needs ffmpeg.
+- **Drop detection & reconnect.** If a live feed goes silent for ~5 s (or a
+  connect produces no video within ~12 s) it is declared lost, audited
+  (`stream.drop`), toasted, and reconnected automatically with capped backoff.
+  RECONNECT in the window skips the wait.
+- **RTSP is pulled over TCP** (`-rtsp_transport tcp`) so feeds survive
+  firewalled court networks; RTMP URLs are passed to ffmpeg as-is.
+- The feed is decoded at up to 15 fps into a 960×540 letterbox — a monitoring
+  view, not a broadcast one. Audio is discarded.
+- **SNAPSHOT** saves the current frame as a PNG (audited as
+  `stream.snapshot`); **PIN** keeps the window always-on-top.
+- Credentials in a `stream_url` (`rtsp://user:pass@…`) are real secrets — they
+  belong only in your git-ignored `config.json`, and are redacted from logs,
+  audits and the window chrome.
 
 ---
 

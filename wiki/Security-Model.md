@@ -57,6 +57,11 @@ require authentication. These credentials:
 - Are supplied via a command's `auth` field
   (`{"username": …, "password": …}`), turned into an HTTP Basic header at
   request time.
+- May also appear inline in a camera's `stream_url`
+  (`rtsp://user:pass@host/…`) for the Live View. Stream URLs are
+  **credential-redacted** before they reach the diagnostic log, the audit
+  trail, or the Live View window chrome — the full URL is only ever handed to
+  the local ffmpeg process.
 - Live **only in the git-ignored `config.json`**, never in
   `config.example.json` (the example uses obvious placeholders like
   `"changeme"`).

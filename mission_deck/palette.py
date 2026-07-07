@@ -193,6 +193,10 @@ class CommandPalette(ctk.CTkToplevel):
                     category_icon_name(device.category), status_color(device.status),
                     lambda rm=r, d=device: app.open_device(rm, d),
                     f"device {device.type} {device.category} {device.host} {device.id}")
+                if device.stream_url:
+                    add(f"Live view — {device.name}", r.name, "video", muted,
+                        lambda rm=r, d=device: app.open_live_view(rm, d),
+                        f"live view stream video feed camera rtsp rtmp {device.id}")
         return items
 
     def _filter(self, query: str) -> list[PaletteItem]:

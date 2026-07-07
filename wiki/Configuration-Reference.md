@@ -138,6 +138,7 @@ All four must be non-empty strings, or the device is rejected with a
 | `web_path` | string | — | Path appended to the web-UI URL (e.g. `/admin`). |
 | `monitor` | string | `tcp` | How reachability is judged — `tcp`, `http`, or `https` (see [Monitors](#monitors)). |
 | `health_url` | string | — | URL the `http`/`https` monitor probes (else the device's `web_url`). |
+| `stream_url` | string | — | Live video feed (`rtsp://…` or `rtmp://…`). Adds a **Live View** pop-out window (single shared window, ffmpeg-decoded, with stream-drop detection and auto-reconnect). Requires ffmpeg on `PATH`, next to the exe, or via `MISSION_DECK_FFMPEG`. See `CONFIG.md` → *Live View Streams*. |
 | `commands` | array | — | Control action buttons (see [Control commands](#control-commands)). |
 
 Any **unknown keys** are preserved in the device's `extra` map for
@@ -259,6 +260,58 @@ Any network or parse error yields **Unknown** (never an error to the operator).
   "recording_stop_url": "https://10.10.1.50/api/recording/stop"
 }
 ```
+
+---
+
+## Live view streams
+
+Any device with a `stream_url` key — aimed at PTZ cameras, most of which serve
+RTSP out of the box — gets a **◉ LIVE VIEW** button in its control panel and a
+`Live view — <camera>` entry in the command palette:
+
+```jsonc
+{
+  "id": "1a-ptz-judge",
+  "name": "Judge Bench PTZ Camera",
+  "type": "ptz_camera",
+  "host": "10.10.1.21",
+  "stream_url": "rtsp://10.10.1.21/media/video1"
+}
+```
+
+Both `rtsp://` and `rtmp://` URLs work. RTSP is usually the right choice for a
+PTZ camera (the camera itself serves it); RTMP typically points at a media
+server the camera pushes to. Typical RTSP paths by vendor:
+
+| Vendor | Typical RTSP URL |
+|--------|------------------|
+| Sony SRG series | `rtsp://<host>/media/video1` |
+| PTZOptics / many OEMs | `rtsp://<host>:554/1` (`/2` for the sub-stream) |
+| Panasonic AW series | `rtsp://<host>/MediaInput/h264` |
+| Axis | `rtsp://<host>/axis-media/media.amp` |
+
+Check the camera's own web UI or manual for the exact path; a sub-stream
+(lower resolution) is ideal — the pop-out decodes at most 960×540 @ 15 fps
+anyway.
+
+Behaviour and requirements:
+
+- **One feed at a time.** A single Live View window exists app-wide; opening
+  another camera (or using the in-window switcher) swaps the feed rather than
+  stacking video decoders. Deliberate — it keeps the Tk UI light.
+- **ffmpeg required.** Decoding uses an external `ffmpeg` binary, found via
+  the `MISSION_DECK_FFMPEG` environment variable → an `ffmpeg.exe` next to
+  `mission-deck.exe` → `PATH`. Nothing else in the app needs it.
+- **Drop detection & auto-reconnect.** A live feed that goes silent for ~5 s
+  (or a connect that produces no video within ~12 s) is declared lost, audited
+  (`stream.drop`), announced with a toast, and reconnected automatically with
+  capped backoff (1 s → 15 s) until the window is closed.
+- **RTSP is pulled over TCP** (`-rtsp_transport tcp`), which survives
+  firewalled court networks where UDP RTP does not.
+- **Audio is discarded**; this is a monitoring view, not a playback deck.
+- Credentials embedded in the URL (`rtsp://user:pass@…`) are supported but are
+  real secrets — keep them in the git-ignored `config.json` only. They are
+  **redacted** from logs, audit events, and the window chrome.
 
 ---
 

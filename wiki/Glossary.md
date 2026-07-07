@@ -73,6 +73,13 @@ check/sweep; it answers per-device and per-room **uptime percentage** queries
 that the Overview's uptime panel renders. Never raises into callers; override the
 DB path with `MISSION_DECK_HISTORY_DB`.
 
+### Live View
+The pop-out window that shows a camera's live video (`stream_url` config key,
+RTSP or RTMP). **One feed at a time** app-wide: opening another camera swaps
+the feed in the single window rather than stacking decoders. Decoding is done
+by an external ffmpeg process (`stream.py`); the window (`live_view.py`) adds
+a status pill, drop toasts, a camera switcher, PNG snapshots, and pinning.
+
 ### Monitor / Monitor registry
 A *monitor* decides how a device's reachability is judged — an
 `async (Device, float) -> CheckResult`. `network.py` holds a registry
@@ -156,6 +163,13 @@ cleanly.
 Per-user preferences and recent-files, stored in the per-user config directory.
 Best-effort: a corrupt/missing file falls back to defaults. Overrides matching
 `app` config values.
+
+### Stream watchdog
+The thread in `stream.py` that detects a dropped camera feed by **frame
+arrival** rather than process health: no frames for ~5 s while live (~12 s
+while connecting) → kill ffmpeg, count a drop, reconnect with capped backoff.
+This is what turns a silently-frozen feed into a visible **SIGNAL LOST** and
+an automatic recovery.
 
 ### TX / RX
 Transmit (encoder) and Receive (decoder) endpoints in an AV-over-IP system.

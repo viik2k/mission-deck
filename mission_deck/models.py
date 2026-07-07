@@ -290,6 +290,18 @@ class Device:
     def is_web_accessible(self) -> bool:
         return self.web_url is not None
 
+    @property
+    def stream_url(self) -> str | None:
+        """The device's live video feed (``rtsp://…`` or ``rtmp://…``), or ``None``.
+
+        Comes verbatim from an optional ``stream_url`` config key (so it rides
+        on :attr:`extra`). Aimed at PTZ cameras, but any device may set it; the
+        UI offers a Live View pop-out whenever it is present.
+        """
+
+        url = self.extra.get("stream_url")
+        return str(url).strip() if isinstance(url, str) and url.strip() else None
+
     def reset_status(self) -> None:
         """Clear runtime check results back to UNKNOWN."""
 

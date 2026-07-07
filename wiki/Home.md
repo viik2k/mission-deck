@@ -31,14 +31,14 @@ mission-deck serves three audiences, and this wiki is organised around them:
   top-nav shell, the estate **Overview**, composable **Dashboards**, the
   **Plugins** screen (Cloud Sync + Activity Log), navigating cities/rooms/devices,
   checking status, opening web UIs, issuing device commands, recording controls,
-  and the Settings dialog.
+  the camera **Live View** pop-out, and the Settings dialog.
 
 ### For administrators
 - **[Installation & Setup](Installation-and-Setup.md)** — running from source,
   building the single-file EXE, and deploying to operator workstations.
 - **[Configuration Reference](Configuration-Reference.md)** — the complete
   `config.json` schema: app settings, rooms, devices, device types, control
-  commands, web-UI resolution, and browser configuration.
+  commands, live view streams, web-UI resolution, and browser configuration.
 - **[Logging & Auditing](Logging-and-Auditing.md)** — the diagnostic and audit
   log streams, where they live, how they rotate, and what every audit event
   means.
@@ -68,12 +68,12 @@ mission-deck serves three audiences, and this wiki is organised around them:
 |----------|-------|
 | Language | Python 3.11+ |
 | UI toolkit | CustomTkinter (dark mode) |
-| Runtime dependencies | `customtkinter`, `pillow` (networking + history use stdlib only) |
+| Runtime dependencies | `customtkinter`, `pillow` (networking + history use stdlib only); optional external `ffmpeg` for the camera Live View |
 | Packaging | PyInstaller → single windowed `.exe` |
 | Config format | External `config.json`, `schema_version: 1` |
 | Config location | git-ignored; repo ships `config.example.json` (dummy data only) |
 | Uptime history | Best-effort SQLite `history.db` in the per-user dir |
-| Test suite | None yet — manual verification against `config.example.json` |
+| Test suite | `pytest` for headless logic (config, controls, history, stream worker); GUI verified manually against `config.example.json` |
 | Current version | `0.2.0` (see `mission_deck/__init__.py`) |
 
 ---

@@ -105,6 +105,10 @@ operator actions. One JSON object per line. Every record carries:
 | `status_check.complete` | A room status check finishes | `room_id`, `room_name`, `devices`, `online`, `offline` |
 | `status_check.estate` | An estate-wide sweep finishes | `devices`, `online`, `offline` |
 | `report.export` | A CSV status report is exported | `path` |
+| `stream.open` | A camera Live View feed is opened (or switched to) | `device_id`, `device_name`, `room`, `url` (credential-redacted) |
+| `stream.drop` | A live feed stalled/ended and reconnection began | `device_id`, `device_name`, `drops`, `error` |
+| `stream.close` | The Live View feed is closed or switched away | `device_id`, `device_name`, `reason`, `frames`, `drops`, `duration_seconds` |
+| `stream.snapshot` | A Live View frame is saved as a PNG | `device_id`, `device_name`, `path`, `ok` |
 
 ### Emitting audit events (developers)
 

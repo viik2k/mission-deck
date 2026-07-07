@@ -14,6 +14,7 @@ Windows executable, and deploying it to operator workstations. It is aimed at
 | **OS** | Primarily Windows (the original deployment target), but the code runs on macOS and Linux too. Config/state/log paths follow each OS's conventions. |
 | **Runtime dependencies** | `customtkinter` (modern dark UI) and `pillow` (image/icon rendering). |
 | **No networking library** | Status checks and control transports use the standard-library `asyncio`/`socket`/`urllib` only — there is no third-party HTTP dependency. |
+| **ffmpeg** *(optional)* | Only needed for the camera **Live View** pop-out (RTSP/RTMP decoding). Install it on `PATH`, place `ffmpeg.exe` next to `mission-deck.exe`, or set `MISSION_DECK_FFMPEG`. Everything else works without it. |
 
 `requirements.txt`:
 
@@ -154,6 +155,7 @@ and browser configuration — is documented in the
 | `MISSION_DECK_CONFIG` | Absolute path to the config file to load (highest-priority discovery location). |
 | `MISSION_DECK_LOG_DIR` | Directory for both log files (overrides the default per-user `logs/`). |
 | `MISSION_DECK_LOG_LEVEL` | Diagnostic verbosity: `DEBUG`, `INFO` (default), `WARNING`, … Use `DEBUG` to trace individual probes and commands. |
+| `MISSION_DECK_FFMPEG` | Absolute path to the ffmpeg binary used by the camera **Live View** (checked before an `ffmpeg.exe` next to the exe and `PATH`). |
 
 On Windows the per-user base honours `%APPDATA%`; on Linux it honours
 `XDG_CONFIG_HOME` (falling back to `~/.config`).

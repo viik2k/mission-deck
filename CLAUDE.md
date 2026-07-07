@@ -22,7 +22,7 @@ pyinstaller mission-deck.spec
 # Output: dist\mission-deck.exe
 ```
 
-No automated test suite exists. Manual verification against `config.example.json` is the current standard.
+Headless logic (config, controls, history, stream worker) is covered by `pytest` under `tests/`; the GUI itself has no automated suite — manual verification against `config.example.json` is the standard there.
 
 ## Architecture
 
@@ -41,6 +41,8 @@ Each module has one job and strict constraints:
 | `dashboard.py` | Estate-wide overview view (flat report: stat strip + attention/recorders/uptime/activity sections) | Presentation only; reads `Site`/`HistoryStore`; no networking; UI thread |
 | `dashboards.py` | Composable dashboards: widget catalogue (`WidgetSpec`/`WIDGETS`) + user-ordered board persisted in `AppState.dashboard_widgets` | Presentation only; same constraints as `dashboard.py`; full rebuild on refresh (boards are small) |
 | `report.py` | Estate status report export (CSV: per-device status, latency, 24h uptime) | Pure data-out; no GUI/networking; UI picks the path and runs it off the Tk thread |
+| `stream.py` | Live camera stream decoding (RTSP/RTMP → raw RGB frames via an external ffmpeg process): `StreamWorker` with watchdog stall detection + backoff reconnect | No GUI; thread-safe; UI pulls the newest frame from a lock-protected slot |
+| `live_view.py` | Live View pop-out window (singleton — one feed/ffmpeg at a time; status pill, drop toasts, camera switcher, snapshot, pin) | Presentation only; polls `StreamWorker` on the Tk timer; never blocks on the pipe |
 | `state.py` | Persisted user preferences + recent files | Best-effort JSON; never breaks app if corrupt |
 | `theme.py` | Colour and sizing constants | Pure constants, no logic |
 | `ui.py` | Cached shared fonts, button/switch style tokens, `PromptDialog` | All views use `ui.font()` (never raw `CTkFont`), the `BTN_*`/`SWITCH` tokens, and `PromptDialog` (never `CTkInputDialog`); cache resets per Tk root |
@@ -106,6 +108,25 @@ not verified unless `verify_tls: true`). `check_device()` is just
 a dispatcher: a device opts into a monitor with a `"monitor"` config key,
 otherwise it falls back to `DEFAULT_MONITOR` (`tcp`). Add a new check type with a
 single decorator — no caller changes.
+
+### Live view (one-feed camera pop-out)
+
+A device (in practice a PTZ camera) with a `stream_url` config key
+(`rtsp://…`/`rtmp://…`) gets a **Live View** pop-out. `stream.py` owns the
+non-GUI half: an external **ffmpeg** process decodes the feed into fixed-size
+raw RGB frames on a pipe, and `StreamWorker` publishes the newest frame into a
+lock-protected slot. Stream-drop detection is a watchdog thread judging
+liveness by *frame arrival* (no frames for ~5 s live / ~12 s connecting →
+kill ffmpeg, count a drop, reconnect with capped backoff — forever, until
+`stop()`). `live_view.py` is the presentation half: `LiveViewWindow` is a
+**singleton** held by `App._live_view` (`App.open_live_view`) — opening
+another camera swaps the feed in place, so at most one ffmpeg process and one
+repainting Tk surface ever exist. The window polls the frame slot on the Tk
+timer (~15 fps) and turns worker counters into toasts/audits
+(`stream.open`/`drop`/`close`/`snapshot`). ffmpeg is discovered via
+`MISSION_DECK_FFMPEG` → next to the frozen exe → `PATH`
+(`stream.find_ffmpeg`); stream URLs may carry credentials and are always
+redacted (`redact_stream_url`) before logging or display.
 
 ### Dashboard + estate-wide sweep
 
@@ -196,7 +217,8 @@ rotating streams to `<user_config_dir>/logs/` (override the directory with
 - **`audit.log`** — one JSON object per line recording operator actions
   (`device.command`, `room.open_web_uis`, `status_check.complete`,
   `status_check.estate`, `config.load`, `config.save`, `config.switch`,
-  `cloud.sync`, `settings.change`, `report.export`, `app.start`/`app.stop`). Emit
+  `cloud.sync`, `settings.change`, `report.export`, `stream.open`/`stream.drop`/
+  `stream.close`/`stream.snapshot`, `app.start`/`app.stop`). Emit
   events with `logging_setup.audit(event, **fields)`; each line carries `ts`, `event`
   and `user`. The audit logger never propagates to the diagnostic handlers.
 

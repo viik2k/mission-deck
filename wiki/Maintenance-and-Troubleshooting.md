@@ -116,6 +116,25 @@ Preferences persist to `state.json` in the per-user dir. If they don't stick,
 that directory may be unwritable — check `mission-deck.log` for a
 "Could not save state" warning and fix the directory permissions.
 
+### Live View shows no video / keeps saying SIGNAL LOST
+
+Work down this list — the window's overlay shows the underlying ffmpeg or
+watchdog error, and `mission-deck.log` has the full detail (set
+`MISSION_DECK_LOG_LEVEL=DEBUG` to see every ffmpeg stderr line):
+
+| Overlay / symptom | Cause | Fix |
+|-------------------|-------|-----|
+| "ffmpeg not found — install ffmpeg or set MISSION_DECK_FFMPEG" | ffmpeg isn't installed or isn't findable | Install ffmpeg and put it on `PATH`, drop `ffmpeg.exe` next to `mission-deck.exe`, or point `MISSION_DECK_FFMPEG` at the binary. |
+| Stuck on **CONNECTING…**, then "connect timed out" every ~12 s | Wrong `stream_url` host/port, camera's RTSP service disabled, or a firewall blocking it | Verify the URL plays in VLC or with `ffplay <url>` from the same workstation. Check the camera's streaming settings and the network path (RTSP is pulled over TCP, usually port 554). |
+| "401 Unauthorized" / "Connection refused" in the overlay detail | Bad or missing credentials, or wrong RTSP path | Fix the URL: `rtsp://user:pass@host/path`. RTSP paths are vendor-specific — see the [Configuration Reference](Configuration-Reference.md#live-view-streams) for common ones. |
+| Goes **LIVE**, then **SIGNAL LOST** every few seconds | Camera or encoder is overloaded, or the network is dropping the stream | Point `stream_url` at the camera's **sub-stream** (lower resolution/bitrate) — the pop-out only renders 960×540 @ 15 fps, so the main 4K stream buys nothing. |
+| No LIVE VIEW button on the device at all | The device has no `stream_url` key | Add one in the config; it takes effect on the next config load. |
+
+Live View never gives up on its own: it reconnects with increasing backoff
+(1 s → 15 s) until the window is closed. Every drop is recorded in the audit
+log (`stream.drop`) with the error, so an intermittent camera leaves a paper
+trail you can review in the Activity Log.
+
 ### Packaged EXE fails to launch
 
 Almost always a packaging issue. Confirm the build used `mission-deck.spec`
