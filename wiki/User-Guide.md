@@ -292,6 +292,51 @@ a live **recording status** (Idle / Recording / Paused), when the recorder's
 status and start/stop URLs are configured. The recording badge also appears on
 the device card.
 
+### Live View (watch a camera's feed)
+
+If a PTZ camera has a **stream URL** configured (an administrator adds a single
+`stream_url` key to the device — see the
+[Configuration Reference](Configuration-Reference.md#live-view-streams)), its
+control panel shows a **◉ LIVE VIEW** button. Clicking it pops out a video
+window showing the camera's live feed. You can also jump straight there from
+the command palette: press **Ctrl+K** and type `live`.
+
+What you'll see in the window:
+
+- A **status pill**: `● LIVE` (green) while frames are flowing,
+  `◌ CONNECTING…` (amber) while the feed starts, `● SIGNAL LOST` (red) if the
+  feed stops arriving.
+- A **stats line**: current frame rate, total frames, drop count, and how long
+  the feed has been up.
+- A **camera switcher** (when the room has more than one streaming camera) —
+  picking another camera swaps the feed *in the same window*.
+
+**One feed at a time — by design.** There is exactly one Live View window in
+the whole app. Opening Live View on a second camera reuses the window and
+swaps the feed. This keeps the app light: one video decoder, one repainting
+surface, no matter how many cameras you check in a row.
+
+**If the feed drops** (camera reboots, network blip, encoder pause), the
+window notices within a few seconds, shows **SIGNAL LOST**, pops a toast, and
+**reconnects automatically** — first quickly, then at a slower, patient pace —
+until the picture returns or you close the window. A "Live view restored"
+toast confirms recovery. You never need to babysit it, but the **RECONNECT**
+button retries immediately if you don't want to wait.
+
+The window's other buttons:
+
+| Button | What it does |
+|--------|--------------|
+| **SNAPSHOT** | Saves the current frame as a PNG (you pick where). Handy for recording what the room looked like at a moment in time; every snapshot is written to the audit log. |
+| **PIN** | Keeps the window on top of everything else — park it in a corner or on a second monitor while you work. |
+| **RECONNECT** | Skips the automatic retry wait and reconnects right now. |
+
+> **Requires ffmpeg.** Live View decodes video with the free `ffmpeg` tool. If
+> it isn't installed the button tells you exactly what to do — see
+> [Installation & Setup](Installation-and-Setup.md#6-environment-variables).
+> Opening, closing, switching, dropping, and snapshotting a stream are all
+> recorded in the [audit log](Logging-and-Auditing.md).
+
 ### Editing from the control panel
 
 If your build allows in-app editing, the control panel may offer affordances to
@@ -350,6 +395,9 @@ log. Unknown fields a future version might use are preserved untouched.
 | A device has **no web button** | It has no web scheme — e.g. an SSH-only or raw-TCP device. That's expected. |
 | A command button reports an **error** | The device may be unreachable, or the command's address/credentials may be wrong. The exact error is shown in the control panel. |
 | The app **won't open my config** | The error dialog explains why (bad JSON, wrong schema version, a malformed room/device). Fix the file or pick another. |
+| A camera has **no LIVE VIEW button** | It has no `stream_url` configured. Ask your administrator to add the camera's RTSP/RTMP URL (see the [Configuration Reference](Configuration-Reference.md#live-view-streams)). |
+| Live View says it **needs ffmpeg** | Install ffmpeg and put it on `PATH` (or next to `mission-deck.exe`). See [Maintenance & Troubleshooting](Maintenance-and-Troubleshooting.md#live-view-shows-no-video--keeps-saying-signal-lost). |
+| Live View is stuck on **SIGNAL LOST** | The camera's stream endpoint is unreachable or the URL/credentials are wrong. The overlay shows the underlying error; see [Maintenance & Troubleshooting](Maintenance-and-Troubleshooting.md#live-view-shows-no-video--keeps-saying-signal-lost). |
 
 For deeper diagnostics, see
 [Maintenance & Troubleshooting](Maintenance-and-Troubleshooting.md) and the
