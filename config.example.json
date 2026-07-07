@@ -693,6 +693,7 @@
           "host": "10.10.2.21",
           "port": 80,
           "protocol": "http",
+          "stream_url": "rtsp://10.10.2.21:554/vaddio-roboshot-stream",
           "tags": ["camera", "video"],
           "commands": [
             {
@@ -736,6 +737,7 @@
           "host": "10.10.2.22",
           "port": 80,
           "protocol": "http",
+          "stream_url": "rtsp://10.10.2.22:554/vaddio-roboshot-stream",
           "tags": ["camera", "video"],
           "commands": [
             {
@@ -1006,6 +1008,7 @@
           "host": "10.20.7.21",
           "port": 80,
           "protocol": "http",
+          "stream_url": "rtsp://10.20.7.21/media/video1",
           "tags": ["camera", "video"],
           "commands": [
             {
@@ -1037,6 +1040,7 @@
           "host": "10.20.7.22",
           "port": 80,
           "protocol": "http",
+          "stream_url": "rtsp://10.20.7.22/media/video1",
           "tags": ["camera", "video"],
           "commands": [
             {
@@ -1363,6 +1367,7 @@
           "host": "10.30.3.21",
           "port": 80,
           "protocol": "http",
+          "stream_url": "rtsp://10.30.3.21/media/video1",
           "tags": ["camera", "video"],
           "commands": [
             {
@@ -1394,6 +1399,7 @@
           "host": "10.30.3.22",
           "port": 80,
           "protocol": "http",
+          "stream_url": "rtmp://10.30.3.40/live/courtroom-3c-witness",
           "tags": ["camera", "video"],
           "commands": [
             {
